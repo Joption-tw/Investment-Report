@@ -73,7 +73,7 @@
             const ALARM_URL = 'https://actions.google.com/sounds/v1/alarms/alarm_clock_ringing_beeps.ogg';
             const audioRef = useRef(new Audio(ALARM_URL));
 
-            // 設定：範圍擴大至 C2 開始以讀取匯總數據
+            // 設定：Google Sheet CSV 匯出設定
             const SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
             const GID = '103299629';
             const RANGE = 'C2:O14'; 
@@ -91,19 +91,19 @@
                     const rawRows = parseCSV(text);
                     
                     if (rawRows.length >= 2) {
-                        const globalRow = rawRows[0];       // C2:O2 (包含 D2, E2)
-                        const originalHeaders = rawRows[1]; // C3:O3
-                        const originalData = rawRows.slice(2); // C4:O14
+                        const globalRow = rawRows[0];       
+                        const originalHeaders = rawRows[1]; 
+                        const originalData = rawRows.slice(2); 
 
                         const tvIdx = originalHeaders.findIndex(h => h.includes('時間價值'));
                         const fiIdx = originalHeaders.findIndex(h => h.includes('期貨指數'));
 
-                        // 更新頂部數據 (D2 是 index 1, E2 是 index 2 因為範圍從 C 開始)
+                        // 更新頂部數據
                         setTopStats({
                             timeValue: tvIdx !== -1 ? (originalData[0] ? originalData[0][tvIdx] : '0.0') : '0.0',
                             futureIndex: fiIdx !== -1 ? (originalData[0] ? originalData[0][fiIdx] : '0.0') : '0.0',
-                            pointsChange: globalRow[1] || '0', // D2
-                            percentChange: globalRow[2] || '0%' // E2
+                            pointsChange: globalRow[1] || '0', 
+                            percentChange: globalRow[2] || '0%' 
                         });
 
                         const filteredHeaders = originalHeaders.filter((_, idx) => idx !== tvIdx && idx !== fiIdx);
@@ -223,7 +223,6 @@
                 return "bg-gradient-to-br from-red-300 via-red-200 to-red-100 text-slate-900";
             };
 
-            // 輔助函式：根據數值正負決定顏色 (台股：紅正綠負)
             const getChangeColor = (val) => {
                 if (!val) return 'text-white';
                 const num = parseFloat(val.toString().replace('%', ''));
@@ -233,6 +232,32 @@
             };
 
             const formatTime = (date) => date.toTimeString().split(' ')[0];
+
+            // 輔助函式：根據名稱返回連結
+            const getLinkUrl = (name) => {
+                // 明確取消連結的名單
+                if (name === "雲熙(主)" || name === "文文(主)") {
+                    return null;
+                }
+                // 特定遠端桌面連結
+                if (name === "示範帳號(主)" || name === "聯發哥(主)") {
+                    return "https://remotedesktop.google.com/access/session/f4dd324c-5a64-499d-a53d-b133d65e3b58";
+                }
+                if (name === "歐大_凱基") {
+                    return "https://remotedesktop.google.com/access/session/61cbea15-89e2-caeb-681a-c6f05d0a526b";
+                }
+                if (name === "大帳號(主)" || name === "gary-lan(主)") {
+                    return "https://remotedesktop.google.com/access/session/dc27f55f-4fa1-79c8-3436-beedaf4ec5c6";
+                }
+                if (name === "獨孤求敗_元富" || name === "軒偉(主)") {
+                    return "https://remotedesktop.google.com/access/session/8efb9e56-5035-10f0-7d87-6be2a33f354a";
+                }
+                if (name === "Earvin(主)") {
+                    return "https://remotedesktop.google.com/access/session/f125983f-e03b-d7b8-be80-58a13690bb12";
+                }
+                // 預設為 Google 搜尋
+                return `https://www.google.com/search?q=${encodeURIComponent(name)}`;
+            };
 
             return (
                 <div className="flex flex-col min-h-screen bg-slate-50 select-none overflow-x-hidden" onDoubleClick={handleStopAlert}>
@@ -260,7 +285,7 @@
                                     <span className="text-[8px] text-slate-500 font-bold uppercase mb-1 leading-none">期貨指數</span>
                                     <div className="flex items-baseline gap-2">
                                         <span className="text-emerald-400 font-mono-data font-bold text-xs md:text-base leading-none">{topStats.futureIndex}</span>
-                                        <span className={`text-[11px] font-mono-data font-bold ${getChangeColor(topStats.pointsChange)}`}>{topStats.pointsChange > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}</span>
+                                        <span className={`text-[11px] font-mono-data font-bold ${getChangeColor(topStats.pointsChange)}`}>{parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}</span>
                                         <span className={`text-[11px] font-mono-data font-bold ${getChangeColor(topStats.percentChange)}`}>({topStats.percentChange})</span>
                                     </div>
                                 </div>
@@ -288,7 +313,6 @@
                                     <div className="flex items-center gap-1.5">
                                         <span className="text-emerald-400 font-mono-data font-bold text-xs leading-none">{topStats.futureIndex}</span>
                                         <span className={`text-[10px] font-mono-data font-bold ${getChangeColor(topStats.pointsChange)}`}>{parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}</span>
-                                        {/* 手機版漲跌幅加上括號作區別 */}
                                         <span className={`text-[10px] font-mono-data font-bold ${getChangeColor(topStats.percentChange)}`}>({topStats.percentChange})</span>
                                     </div>
                                 </div>
@@ -337,6 +361,7 @@
                                                             const isAlertExtreme = isRatioHeader && !isNaN(numVal) && (numVal < 0.35 || numVal > 0.65);
                                                             const ratioGradient = getRatioGradientClass(headers[cIdx], cell);
                                                             const marginClass = getMarginGradientClass(headers[cIdx], cell);
+                                                            
                                                             let cellStyle = "px-4 py-2.5 text-xs font-bold font-mono-data text-center ";
                                                             if (isDiscMsg) cellStyle += "bg-red-600 text-white animate-pulse";
                                                             else if (isAlertExtreme) cellStyle += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
@@ -344,6 +369,27 @@
                                                             else if (ratioGradient) cellStyle += ratioGradient;
                                                             else if (isNeg) cellStyle += "text-red-500";
                                                             else cellStyle += "text-slate-700";
+
+                                                            if (cIdx === 0) {
+                                                                const linkUrl = getLinkUrl(cell);
+                                                                return (
+                                                                    <td key={cIdx} className={`${cellStyle} ${linkUrl ? 'p-0' : ''}`}>
+                                                                        {linkUrl ? (
+                                                                            <a 
+                                                                                href={linkUrl} 
+                                                                                target="_blank" 
+                                                                                rel="noopener noreferrer"
+                                                                                className="block w-full h-full px-4 py-2.5 hover:bg-slate-100 hover:text-blue-600 transition-colors underline decoration-dotted underline-offset-4"
+                                                                            >
+                                                                                {cell || '無名稱'}
+                                                                            </a>
+                                                                        ) : (
+                                                                            <span className="px-4 py-2.5 block">{cell || '無名稱'}</span>
+                                                                        )}
+                                                                    </td>
+                                                                );
+                                                            }
+
                                                             return <td key={cIdx} className={cellStyle}>{cell || '0'}</td>;
                                                         })}
                                                     </tr>
@@ -357,7 +403,21 @@
                                     {data.map((row, rIdx) => (
                                         <div key={rIdx} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                                             <div className="bg-slate-900 px-3 py-1.5 flex justify-between items-center">
-                                                <span className="text-white font-bold text-xs tracking-tight">{row[0]}</span>
+                                                {(() => {
+                                                    const linkUrl = getLinkUrl(row[0]);
+                                                    return linkUrl ? (
+                                                        <a 
+                                                            href={linkUrl} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            className="text-white font-bold text-xs tracking-tight hover:text-yellow-400 active:text-yellow-500 transition-colors"
+                                                        >
+                                                            {row[0]} <span className="ml-1 opacity-50 text-[10px]">↗</span>
+                                                        </a>
+                                                    ) : (
+                                                        <span className="text-white font-bold text-xs tracking-tight">{row[0]}</span>
+                                                    );
+                                                })()}
                                                 <span className="text-[8px] bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-black shrink-0">#{rIdx+1}</span>
                                             </div>
                                             <div className="p-2 grid grid-cols-2 gap-y-1 gap-x-2">
