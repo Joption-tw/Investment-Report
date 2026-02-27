@@ -10,40 +10,61 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
-
-        :root {
-            --primary: #0f172a;
-            --accent: #eab308;
-            --danger: #dc2626;
-        }
-
-        /* 核心佈局 */
-        html, body {
-            margin: 0;
-            padding: 0;
-            height: auto !important;
-            min-height: 100%;
-            overflow: visible !important;
-            background-color: #f8fafc;
-            -webkit-font-smoothing: antialiased;
-        }
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
 
         body {
             font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f1f5f9;
+            color: #1e293b;
         }
 
         .font-mono-data {
             font-family: 'JetBrains Mono', monospace;
         }
 
-        table { border-collapse: separate; border-spacing: 0; }
-        th, td { border: 1px solid #e2e8f0 !important; }
+        /* 3D 按鈕樣式 */
+        .btn-3d-full {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 10px 4px;
+            background-color: #eab308; /* amber-500 */
+            color: #0f172a;
+            font-weight: 900;
+            border-radius: 8px;
+            border-bottom: 4px solid #a16207; /* darker amber edge */
+            transition: all 0.1s;
+            text-transform: uppercase;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
 
-        * { -webkit-tap-highlight-color: transparent; }
+        .btn-3d-full.clickable:hover {
+            background-color: #fbbf24;
+        }
 
+        .btn-3d-full.clickable:active {
+            border-bottom-width: 0px;
+            transform: translateY(4px);
+            box-shadow: none;
+        }
+
+        .btn-3d-no-link {
+            cursor: default;
+        }
+
+        /* 表格格線微調 */
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #e2e8f0; }
+        
+        /* 隱藏捲軸 */
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        /* 卡片式佈局陰影 */
+        .card-shadow {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
     </style>
 </head>
 <body>
@@ -51,6 +72,8 @@
 
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+        const VERSION = "v1.6.0";
 
         const App = () => {
             const [data, setData] = useState([]);
@@ -69,11 +92,8 @@
             const [isAlerting, setIsAlerting] = useState(false);
             const [lastStopTimestamp, setLastStopTimestamp] = useState(0);
             const [isAudioInitialized, setIsAudioInitialized] = useState(false);
-            
-            const ALARM_URL = 'https://actions.google.com/sounds/v1/alarms/alarm_clock_ringing_beeps.ogg';
-            const audioRef = useRef(new Audio(ALARM_URL));
+            const audioRef = useRef(new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock_ringing_beeps.ogg'));
 
-            // 設定：Google Sheet CSV 匯出設定
             const SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
             const GID = '103299629';
             const RANGE = 'C2:O14'; 
@@ -85,8 +105,6 @@
                 
                 try {
                     const response = await fetch(`${CSV_URL}&t=${Date.now()}`);
-                    if (!response.ok) throw new Error('無法讀取數據');
-                    
                     const text = await response.text();
                     const rawRows = parseCSV(text);
                     
@@ -98,10 +116,9 @@
                         const tvIdx = originalHeaders.findIndex(h => h.includes('時間價值'));
                         const fiIdx = originalHeaders.findIndex(h => h.includes('期貨指數'));
 
-                        // 更新頂部數據
                         setTopStats({
-                            timeValue: tvIdx !== -1 ? (originalData[0] ? originalData[0][tvIdx] : '0.0') : '0.0',
-                            futureIndex: fiIdx !== -1 ? (originalData[0] ? originalData[0][fiIdx] : '0.0') : '0.0',
+                            timeValue: tvIdx !== -1 ? (originalData[0]?.[tvIdx] || '0.0') : '0.0',
+                            futureIndex: fiIdx !== -1 ? (originalData[0]?.[fiIdx] || '0.0') : '0.0',
                             pointsChange: globalRow[1] || '0', 
                             percentChange: globalRow[2] || '0%' 
                         });
@@ -128,58 +145,34 @@
                 const syncTimer = setInterval(() => fetchData(true), 30000);
                 const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
                 const initAudio = () => {
-                    const audio = audioRef.current;
-                    audio.play().then(() => {
-                        audio.pause();
-                        audio.currentTime = 0;
+                    audioRef.current.play().then(() => {
+                        audioRef.current.pause();
                         setIsAudioInitialized(true);
                         window.removeEventListener('click', initAudio);
-                        window.removeEventListener('touchstart', initAudio);
                     }).catch(() => {});
                 };
                 window.addEventListener('click', initAudio);
-                window.addEventListener('touchstart', initAudio);
-                return () => { 
-                    clearInterval(syncTimer); clearInterval(clockTimer);
-                    window.removeEventListener('click', initAudio); window.removeEventListener('touchstart', initAudio);
-                };
+                return () => { clearInterval(syncTimer); clearInterval(clockTimer); };
             }, [fetchData]);
 
             const hasExtremeRatio = useMemo(() => {
                 const ratioIdx = headers.findIndex(h => h.includes('買權比值') || h.includes('比值平衡'));
                 if (ratioIdx === -1) return false;
                 return data.some(row => {
-                    const val = row[ratioIdx];
-                    if (!val) return false;
-                    const num = parseFloat(val);
-                    return !isNaN(num) && (num < 0.35 || num > 0.65);
+                    const val = parseFloat(row[ratioIdx]);
+                    return !isNaN(val) && (val < 0.35 || val > 0.65);
                 });
             }, [data, headers]);
 
             useEffect(() => {
-                const audio = audioRef.current;
-                audio.loop = true;
-                if (hasExtremeRatio) {
-                    const now = Date.now();
-                    if (now - lastStopTimestamp > 60000) {
-                        setIsAlerting(true);
-                        audio.play().catch(() => {});
-                    }
+                if (hasExtremeRatio && (Date.now() - lastStopTimestamp > 60000)) {
+                    setIsAlerting(true);
+                    audioRef.current.play().catch(() => {});
                 } else {
                     setIsAlerting(false);
-                    audio.pause();
-                    audio.currentTime = 0;
+                    audioRef.current.pause();
                 }
             }, [hasExtremeRatio, lastStopTimestamp]);
-
-            const handleStopAlert = () => {
-                if (isAlerting) {
-                    setIsAlerting(false);
-                    setLastStopTimestamp(Date.now());
-                    audioRef.current.pause();
-                    audioRef.current.currentTime = 0;
-                }
-            };
 
             const parseCSV = (text) => {
                 const lines = text.split(/\r?\n/);
@@ -198,270 +191,187 @@
                 });
             };
 
-            const isNegative = (val) => {
-                if (typeof val !== 'string') return false;
-                const trimmed = val.trim();
-                return trimmed.startsWith('-') || (trimmed.startsWith('(') && trimmed.endsWith(')'));
-            };
-
-            const getRatioGradientClass = (header, val) => {
-                if (!header || (!header.includes('比值平衡') && !header.includes('買權比值'))) return "";
-                const num = parseFloat(val);
-                if (isNaN(num) || (num >= 0.4 && num <= 0.6)) return "";
-                if (num <= 0.30 || num >= 0.70) return "bg-gradient-to-br from-yellow-500 via-yellow-400 to-yellow-300 text-slate-900 shadow-inner";
-                if (num <= 0.35 || num >= 0.65) return "bg-gradient-to-br from-yellow-400 via-yellow-300 to-yellow-200 text-slate-900 shadow-sm";
-                return "bg-gradient-to-br from-yellow-200 via-yellow-100 to-yellow-50 text-slate-900";
-            };
-
-            const getMarginGradientClass = (header, val) => {
-                if (!header || (!header.includes('剩餘比率') && !header.includes('保證金剩餘比例'))) return "";
-                const num = parseFloat(val.replace('%', ''));
-                if (isNaN(num) || num > 40) return "";
-                if (num <= 10) return "bg-gradient-to-br from-red-950 via-red-900 to-red-800 text-white shadow-inner";
-                if (num <= 20) return "bg-gradient-to-br from-red-800 via-red-700 to-red-600 text-white shadow-inner";
-                if (num <= 30) return "bg-gradient-to-br from-red-600 via-red-500 to-red-400 text-white";
-                return "bg-gradient-to-br from-red-300 via-red-200 to-red-100 text-slate-900";
-            };
-
-            const getChangeColor = (val) => {
-                if (!val) return 'text-white';
-                const num = parseFloat(val.toString().replace('%', ''));
-                if (num > 0) return 'text-red-500';
-                if (num < 0) return 'text-green-500';
-                return 'text-white';
-            };
-
-            const formatTime = (date) => date.toTimeString().split(' ')[0];
-
-            // 輔助函式：根據名稱返回連結
             const getLinkUrl = (name) => {
-                // 明確取消連結的名單
-                if (name === "雲熙(主)" || name === "文文(主)") {
-                    return null;
+                if (name === "雲熙(主)" || name === "文文(主)") return null;
+                const mapping = {
+                    "示範帳號(主)": "f4dd324c-5a64-499d-a53d-b133d65e3b58",
+                    "聯發哥(主)": "f4dd324c-5a64-499d-a53d-b133d65e3b58",
+                    "歐大_凱基": "61cbea15-89e2-caeb-681a-c6f05d0a526b",
+                    "大帳號(主)": "dc27f55f-4fa1-79c8-3436-beedaf4ec5c6",
+                    "gary-lan(主)": "dc27f55f-4fa1-79c8-3436-beedaf4ec5c6",
+                    "獨孤求敗_元富": "8efb9e56-5035-10f0-7d87-6be2a33f354a",
+                    "軒偉(主)": "8efb9e56-5035-10f0-7d87-6be2a33f354a",
+                    "Earvin(主)": "f125983f-e03b-d7b8-be80-58a13690bb12"
+                };
+                return mapping[name] ? `https://remotedesktop.google.com/access/session/${mapping[name]}` : `https://www.google.com/search?q=${encodeURIComponent(name)}`;
+            };
+
+            const getCellStyles = (header, val) => {
+                if (!val) return "";
+                const num = parseFloat(val.toString().replace('%', ''));
+                if (isNaN(num)) return "";
+                
+                if (header.includes('更新時間') && val.includes('斷線')) return "bg-red-500 text-white animate-pulse";
+                if (header.includes('買權比值') || header.includes('比值平衡')) {
+                    if (num <= 0.35 || num >= 0.65) return "bg-yellow-400 border-2 border-red-600 text-slate-900";
+                    if (num <= 0.38 || num >= 0.62) return "bg-yellow-100";
                 }
-                // 特定遠端桌面連結
-                if (name === "示範帳號(主)" || name === "聯發哥(主)") {
-                    return "https://remotedesktop.google.com/access/session/f4dd324c-5a64-499d-a53d-b133d65e3b58";
-                }
-                if (name === "歐大_凱基") {
-                    return "https://remotedesktop.google.com/access/session/61cbea15-89e2-caeb-681a-c6f05d0a526b";
-                }
-                if (name === "大帳號(主)" || name === "gary-lan(主)") {
-                    return "https://remotedesktop.google.com/access/session/dc27f55f-4fa1-79c8-3436-beedaf4ec5c6";
-                }
-                if (name === "獨孤求敗_元富" || name === "軒偉(主)") {
-                    return "https://remotedesktop.google.com/access/session/8efb9e56-5035-10f0-7d87-6be2a33f354a";
-                }
-                if (name === "Earvin(主)") {
-                    return "https://remotedesktop.google.com/access/session/f125983f-e03b-d7b8-be80-58a13690bb12";
-                }
-                // 預設為 Google 搜尋
-                return `https://www.google.com/search?q=${encodeURIComponent(name)}`;
+                return "";
             };
 
             return (
-                <div className="flex flex-col min-h-screen bg-slate-50 select-none overflow-x-hidden" onDoubleClick={handleStopAlert}>
-                    {!isAudioInitialized && <div className="fixed top-0 left-0 w-full h-1 bg-yellow-400 z-[100] opacity-50"></div>}
-
-                    {/* 電腦版頂部欄 */}
-                    <header className="hidden sm:block sticky top-0 bg-slate-900 text-white shadow-lg z-50 border-b border-slate-800">
-                        <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5">
-                            <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${refreshing ? 'bg-yellow-400 animate-pulse' : 'bg-emerald-500'}`}></div>
-                                <span className="text-[9px] font-bold tracking-widest text-slate-400 uppercase">System Active</span>
-                            </div>
-                            <div className="text-[10px] font-mono font-bold text-slate-300">{formatTime(currentTime)}</div>
+                <div className="flex flex-col min-h-screen select-none overflow-x-hidden p-0 sm:p-4">
+                    {/* 頁首設計 */}
+                    <div className="max-w-[1400px] mx-auto w-full mb-2 sm:mb-4 shadow-lg sm:rounded-lg overflow-hidden flex flex-col sm:flex-row">
+                        <div className="bg-[#eab308] p-3 sm:p-4 flex-1 flex items-center justify-between sm:justify-start">
+                            <h1 className="text-xl sm:text-2xl font-black italic tracking-tighter text-slate-900 uppercase">歐大的投資報表</h1>
+                            <div className="sm:hidden text-[10px] font-mono font-bold text-slate-800">{currentTime.toLocaleTimeString()}</div>
                         </div>
-                        <div className="flex flex-col md:flex-row md:items-center">
-                            <div className="bg-yellow-400 text-slate-900 px-4 py-3 md:py-4 flex-1">
-                                <h1 className="text-xl md:text-2xl font-black italic tracking-tighter uppercase">歐大的投資報表</h1>
+                        <div className="bg-[#1e293b] text-white p-3 sm:p-4 flex gap-4 sm:gap-8 items-center justify-between sm:justify-end">
+                            <div className="text-center">
+                                <div className="text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase mb-0.5 sm:mb-1 leading-none">時間價值</div>
+                                <div className="font-mono-data text-base sm:text-xl font-bold text-emerald-400 leading-none">{topStats.timeValue}</div>
                             </div>
-                            <div className="flex divide-x divide-slate-800 bg-slate-900 border-t border-slate-800 md:border-t-0">
-                                <div className="px-4 py-1.5 flex flex-col items-center justify-center text-center">
-                                    <span className="text-[8px] text-slate-500 font-bold uppercase mb-1 leading-none">時間價值</span>
-                                    <span className="text-emerald-400 font-mono-data font-bold text-xs md:text-base leading-none">{topStats.timeValue}</span>
-                                </div>
-                                <div className="px-4 py-1.5 flex flex-col items-center justify-center text-center">
-                                    <span className="text-[8px] text-slate-500 font-bold uppercase mb-1 leading-none">期貨指數</span>
-                                    <div className="flex items-baseline gap-2">
-                                        <span className="text-emerald-400 font-mono-data font-bold text-xs md:text-base leading-none">{topStats.futureIndex}</span>
-                                        <span className={`text-[11px] font-mono-data font-bold ${getChangeColor(topStats.pointsChange)}`}>{parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}</span>
-                                        <span className={`text-[11px] font-mono-data font-bold ${getChangeColor(topStats.percentChange)}`}>({topStats.percentChange})</span>
+                            <div className="text-center">
+                                <div className="text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase mb-0.5 sm:mb-1 leading-none">期貨指數</div>
+                                <div className="flex items-center gap-1 sm:gap-2 leading-none">
+                                    <span className="font-mono-data text-base sm:text-xl font-bold text-emerald-400">{topStats.futureIndex}</span>
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center sm:gap-1">
+                                        <span className={`text-[10px] sm:text-xs font-bold ${parseFloat(topStats.pointsChange) >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                            {parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}
+                                        </span>
+                                        <span className={`text-[10px] sm:text-xs font-bold ${parseFloat(topStats.percentChange) >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                            ({topStats.percentChange})
+                                        </span>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </header>
-
-                    {/* 手機版頂部統計 */}
-                    <div className="sm:hidden sticky top-0 z-50 bg-slate-50 pb-1">
-                        <div className="space-y-1">
-                            <div className="flex justify-between items-center bg-slate-900 px-3 py-1.5 shadow-md">
-                                <div className="flex items-center gap-1.5">
-                                    <div className={`w-1.5 h-1.5 rounded-full ${refreshing ? 'bg-yellow-400 animate-pulse' : 'bg-emerald-500'}`}></div>
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">LIVE SYSTEM</span>
-                                </div>
-                                <div className="text-[10px] font-mono text-slate-300 font-bold">{formatTime(currentTime)}</div>
-                            </div>
-                            <div className="flex divide-x divide-slate-800 bg-slate-900 overflow-hidden border-b border-slate-800 shadow-md">
-                                <div className="flex-1 p-2 flex flex-col items-center justify-center text-center">
-                                    <span className="text-[8px] text-slate-500 font-bold uppercase mb-0.5 leading-none">時間價值</span>
-                                    <span className="text-emerald-400 font-mono-data font-bold text-xs leading-none">{topStats.timeValue}</span>
-                                </div>
-                                <div className="flex-[1.5] p-2 flex flex-col items-center justify-center text-center">
-                                    <span className="text-[8px] text-slate-500 font-bold uppercase mb-0.5 leading-none">期貨指數 / 漲跌</span>
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="text-emerald-400 font-mono-data font-bold text-xs leading-none">{topStats.futureIndex}</span>
-                                        <span className={`text-[10px] font-mono-data font-bold ${getChangeColor(topStats.pointsChange)}`}>{parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}</span>
-                                        <span className={`text-[10px] font-mono-data font-bold ${getChangeColor(topStats.percentChange)}`}>({topStats.percentChange})</span>
-                                    </div>
-                                </div>
+                            <div className="hidden md:block border-l border-slate-700 pl-4 text-xs font-mono text-slate-400">
+                                {currentTime.toLocaleTimeString()}
                             </div>
                         </div>
                     </div>
 
-                    <main className={`p-1 sm:p-4 bg-[#f1f5f9] transition-transform`}>
-                        {loading && data.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-                                <div className="w-8 h-8 border-4 border-slate-200 border-t-yellow-400 rounded-full animate-spin mb-4"></div>
-                                <p className="text-xs font-bold uppercase tracking-widest font-mono">Loading Data...</p>
-                            </div>
-                        ) : error ? (
-                            <div className="bg-red-50 border border-red-200 p-6 rounded-xl text-center my-10 max-w-sm mx-auto">
-                                <p className="text-red-600 font-bold mb-4">⚠️ 連線異常</p>
-                                <button onClick={() => fetchData()} className="px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-bold">重新嘗試</button>
-                            </div>
-                        ) : (
-                            <div className="max-w-7xl mx-auto pb-20">
-                                {isAlerting && (
-                                    <div className="mb-4 bg-red-600 text-white px-4 py-2 rounded-lg text-center font-bold text-sm animate-pulse flex items-center justify-center gap-2 shadow-xl">
-                                        <span>⚠️ 極端警報：數值大偏移</span>
-                                        <span className="text-[10px] bg-white text-red-600 px-2 py-0.5 rounded">雙擊暫停音效</span>
-                                    </div>
-                                )}
+                    {/* 警報區塊 */}
+                    {isAlerting && (
+                        <div className="max-w-[1400px] mx-auto w-full mb-4 bg-red-600 text-white px-4 py-2 rounded-lg text-center font-black text-xs sm:text-sm animate-pulse shadow-xl flex items-center justify-center gap-4" onDoubleClick={() => setLastStopTimestamp(Date.now())}>
+                            <span>⚠️ 極端警報：數值大偏移</span>
+                            <button className="text-[9px] bg-white text-red-600 px-2 py-0.5 rounded uppercase font-bold">雙擊暫停</button>
+                        </div>
+                    )}
 
-                                <div className="hidden lg:block bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-left">
-                                            <thead>
-                                                <tr className="bg-slate-900 text-slate-300">
-                                                    {headers.map((h, i) => (
-                                                        <th key={i} className="px-4 py-3 text-[11px] font-black uppercase tracking-wider text-center border-slate-800">{h}</th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {data.map((row, rIdx) => (
-                                                    <tr key={rIdx} className="hover:bg-slate-50 transition-colors">
-                                                        {row.map((cell, cIdx) => {
-                                                            const isNeg = isNegative(cell);
-                                                            const isDiscMsg = headers[cIdx].includes('更新時間') && cell.includes('斷線');
-                                                            const numVal = parseFloat(cell.replace('%', ''));
-                                                            const isRatioHeader = headers[cIdx].includes('買權比值') || headers[cIdx].includes('比值平衡');
-                                                            const isAlertExtreme = isRatioHeader && !isNaN(numVal) && (numVal < 0.35 || numVal > 0.65);
-                                                            const ratioGradient = getRatioGradientClass(headers[cIdx], cell);
-                                                            const marginClass = getMarginGradientClass(headers[cIdx], cell);
-                                                            
-                                                            let cellStyle = "px-4 py-2.5 text-xs font-bold font-mono-data text-center ";
-                                                            if (isDiscMsg) cellStyle += "bg-red-600 text-white animate-pulse";
-                                                            else if (isAlertExtreme) cellStyle += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
-                                                            else if (marginClass) cellStyle += marginClass;
-                                                            else if (ratioGradient) cellStyle += ratioGradient;
-                                                            else if (isNeg) cellStyle += "text-red-500";
-                                                            else cellStyle += "text-slate-700";
-
-                                                            if (cIdx === 0) {
-                                                                const linkUrl = getLinkUrl(cell);
-                                                                return (
-                                                                    <td key={cIdx} className={`${cellStyle} ${linkUrl ? 'p-0' : ''}`}>
-                                                                        {linkUrl ? (
-                                                                            <a 
-                                                                                href={linkUrl} 
-                                                                                target="_blank" 
-                                                                                rel="noopener noreferrer"
-                                                                                className="block w-full h-full px-4 py-2.5 hover:bg-slate-100 hover:text-blue-600 transition-colors underline decoration-dotted underline-offset-4"
-                                                                            >
-                                                                                {cell || '無名稱'}
-                                                                            </a>
-                                                                        ) : (
-                                                                            <span className="px-4 py-2.5 block">{cell || '無名稱'}</span>
-                                                                        )}
-                                                                    </td>
-                                                                );
-                                                            }
-
-                                                            return <td key={cIdx} className={cellStyle}>{cell || '0'}</td>;
-                                                        })}
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-
-                                <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    {data.map((row, rIdx) => (
-                                        <div key={rIdx} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
-                                            <div className="bg-slate-900 px-3 py-1.5 flex justify-between items-center">
-                                                {(() => {
-                                                    const linkUrl = getLinkUrl(row[0]);
-                                                    return linkUrl ? (
-                                                        <a 
-                                                            href={linkUrl} 
-                                                            target="_blank" 
-                                                            rel="noopener noreferrer"
-                                                            className="text-white font-bold text-xs tracking-tight hover:text-yellow-400 active:text-yellow-500 transition-colors"
-                                                        >
-                                                            {row[0]} <span className="ml-1 opacity-50 text-[10px]">↗</span>
-                                                        </a>
-                                                    ) : (
-                                                        <span className="text-white font-bold text-xs tracking-tight">{row[0]}</span>
-                                                    );
-                                                })()}
-                                                <span className="text-[8px] bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-black shrink-0">#{rIdx+1}</span>
-                                            </div>
-                                            <div className="p-2 grid grid-cols-2 gap-y-1 gap-x-2">
-                                                {headers.slice(1).map((h, i) => {
-                                                    const cell = row[i+1];
-                                                    const isNeg = isNegative(cell);
-                                                    const isDiscCell = h.includes('更新時間') && cell.includes('斷線');
-                                                    const numVal = parseFloat(cell.replace('%', ''));
-                                                    const isRatioHeader = h.includes('買權比值') || h.includes('比值平衡');
-                                                    const isAlertExtreme = isRatioHeader && !isNaN(numVal) && (numVal < 0.35 || numVal > 0.65);
-                                                    const ratioGradient = getRatioGradientClass(h, cell);
-                                                    const marginClass = getMarginGradientClass(h, cell);
-                                                    let highlightClass = "";
-                                                    let textClass = isNeg ? "text-red-500" : "text-slate-800";
-                                                    if (marginClass) {
-                                                        highlightClass = marginClass + " rounded";
-                                                        if (marginClass.includes('text-white')) textClass = "text-white";
-                                                    } else if (isAlertExtreme) {
-                                                        highlightClass = ratioGradient + " rounded border-2 border-red-600 shadow-inner";
-                                                        textClass = "text-red-700";
-                                                    } else if (isDiscCell) {
-                                                        highlightClass = "bg-red-600 text-white rounded animate-pulse";
-                                                        textClass = "text-white";
-                                                    } else if (ratioGradient) {
-                                                        highlightClass = ratioGradient + " rounded border border-yellow-400 shadow-sm";
-                                                        textClass = "text-slate-900";
-                                                    }
+                    {/* 桌面版表格 (md 以上顯示) */}
+                    <div className="hidden md:block max-w-[1400px] mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden border border-slate-200">
+                        <div className="overflow-x-auto">
+                            <table className="text-center">
+                                <thead>
+                                    <tr className="bg-[#0f172a] text-slate-300">
+                                        {headers.map((h, i) => (
+                                            <th key={i} className="px-3 py-4 text-[11px] font-black uppercase tracking-wider">{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.map((row, rIdx) => {
+                                        const isLastRow = rIdx === data.length - 1;
+                                        return (
+                                            <tr key={rIdx} className={`${isLastRow ? 'bg-slate-100 font-bold' : 'hover:bg-slate-50'} transition-colors`}>
+                                                {row.map((cell, cIdx) => {
+                                                    const isName = cIdx === 0;
+                                                    const link = isName ? getLinkUrl(cell) : null;
+                                                    const specialStyle = getCellStyles(headers[cIdx], cell);
+                                                    const isNegative = typeof cell === 'string' && (cell.includes('-') || (cell.startsWith('(') && cell.endsWith(')')));
+                                                    
                                                     return (
-                                                        <div key={i} className={`flex justify-between items-center border-b border-slate-50 py-1 px-1.5 ${highlightClass}`}>
-                                                            <span className={`text-[9px] font-bold uppercase truncate max-w-[60px] leading-none tracking-tighter ${highlightClass && textClass === "text-white" ? 'text-white' : 'text-slate-400'}`}>{h}</span>
-                                                            <span className={`text-xs font-mono-data font-black leading-none ${textClass}`}>{cell || '0'}</span>
-                                                        </div>
+                                                        <td key={cIdx} className={`p-0 ${specialStyle}`}>
+                                                            {isName && !isLastRow ? (
+                                                                <div className="p-1">
+                                                                    {link ? (
+                                                                        <a href={link} target="_blank" rel="noopener noreferrer" className="btn-3d-full clickable">
+                                                                            {cell} <span className="ml-1 opacity-40 text-[10px]">↗</span>
+                                                                        </a>
+                                                                    ) : (
+                                                                        <div className="btn-3d-full btn-3d-no-link">
+                                                                            {cell}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <div className={`px-2 py-3 text-xs font-bold font-mono-data ${isNegative ? 'text-red-500' : 'text-slate-700'} ${isLastRow ? 'text-sm' : ''}`}>
+                                                                    {cell || '0'}
+                                                                </div>
+                                                            )}
+                                                        </td>
                                                     );
                                                 })}
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* 手機版卡片佈局 (md 以下顯示) */}
+                    <div className="md:hidden flex flex-col gap-4 p-2 pb-24">
+                        {data.map((row, rIdx) => {
+                            const isLastRow = rIdx === data.length - 1;
+                            if (isLastRow) return (
+                                <div key={rIdx} className="bg-slate-800 text-white p-4 rounded-xl shadow-lg border-2 border-amber-500">
+                                    <div className="text-center font-black uppercase tracking-widest text-xs mb-3 text-amber-500">歐大總績效</div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {headers.slice(3).map((h, i) => (
+                                            <div key={i} className="flex flex-col items-center">
+                                                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">{h}</div>
+                                                <div className={`font-mono-data text-sm font-black ${row[i+3]?.includes('-') ? 'text-red-400' : 'text-emerald-400'}`}>{row[i+3] || '0'}</div>
                                             </div>
-                                        </div>
-                                    ))}
-                                    <div className="col-span-full py-10 text-center opacity-20">
-                                        <p className="text-[9px] font-black tracking-[0.4em] uppercase">END OF STREAM</p>
+                                        ))}
                                     </div>
                                 </div>
-                            </div>
-                        )}
-                    </main>
+                            );
+
+                            return (
+                                <div key={rIdx} className="bg-white rounded-2xl overflow-hidden card-shadow border border-slate-200">
+                                    {/* 卡片標題：名稱按鈕 */}
+                                    <div className="p-2 bg-slate-50 border-b border-slate-100">
+                                        {(() => {
+                                            const link = getLinkUrl(row[0]);
+                                            return link ? (
+                                                <a href={link} target="_blank" rel="noopener noreferrer" className="btn-3d-full clickable">
+                                                    {row[0]} <span className="ml-2 opacity-40">↗</span>
+                                                </a>
+                                            ) : (
+                                                <div className="btn-3d-full btn-3d-no-link">{row[0]}</div>
+                                            );
+                                        })()}
+                                    </div>
+                                    
+                                    {/* 核心數據網格 */}
+                                    <div className="p-4 grid grid-cols-2 gap-y-4 gap-x-2">
+                                        {headers.slice(1).map((h, i) => {
+                                            const cell = row[i+1];
+                                            const specialStyle = getCellStyles(h, cell);
+                                            const isNegative = typeof cell === 'string' && (cell.includes('-') || (cell.startsWith('(') && cell.endsWith(')')));
+                                            
+                                            return (
+                                                <div key={i} className={`flex flex-col ${i % 2 === 0 ? 'items-start' : 'items-end'}`}>
+                                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter mb-1">{h}</span>
+                                                    <span className={`px-2 py-1 rounded-md text-sm font-bold font-mono-data ${specialStyle || (isNegative ? 'text-red-500' : 'text-slate-800')}`}>
+                                                        {cell || '0'}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    
+                    <footer className="max-w-[1400px] mx-auto w-full py-8 px-4 flex justify-between items-center opacity-40">
+                        <p className="text-[10px] font-black tracking-[0.2em] sm:tracking-[0.4em] uppercase">System Live Feed • End of Stream</p>
+                        <p className="text-[10px] font-mono font-black text-slate-900">{VERSION}</p>
+                    </footer>
                 </div>
             );
         };
