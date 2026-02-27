@@ -15,20 +15,19 @@
         body {
             font-family: 'Noto Sans TC', sans-serif;
             background-color: #f1f5f9;
-            color: #1e293b;
         }
 
         .font-mono-data {
             font-family: 'JetBrains Mono', monospace;
         }
 
-        /* 3D 按鈕樣式 */
+        /* 3D 按鈕樣式 (參考 image_0b489a.png) */
         .btn-3d-full {
             display: flex;
             align-items: center;
             justify-content: center;
             width: 100%;
-            padding: 8px 4px; /* 手機版預設較扁平 */
+            padding: 10px 4px;
             background-color: #eab308; /* amber-500 */
             color: #0f172a;
             font-weight: 900;
@@ -37,12 +36,6 @@
             transition: all 0.1s;
             text-transform: uppercase;
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-        }
-
-        @media (min-width: 768px) {
-            .btn-3d-full {
-                padding: 10px 4px;
-            }
         }
 
         .btn-3d-full.clickable:hover {
@@ -55,22 +48,18 @@
             box-shadow: none;
         }
 
+        /* 無連結按鈕微調：去除手型指標 */
         .btn-3d-no-link {
             cursor: default;
         }
 
-        /* 表格格線微調 */
+        /* 表格格線微調 (參考 image_0b4863.png) */
         table { border-collapse: collapse; width: 100%; }
         th, td { border: 1px solid #e2e8f0; }
         
         /* 隱藏捲軸 */
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-
-        /* 卡片式佈局陰影 */
-        .card-shadow {
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        }
     </style>
 </head>
 <body>
@@ -79,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
-        const VERSION = "v1.7.0";
+        const VERSION = "v1.5.0";
 
         const App = () => {
             const [data, setData] = useState([]);
@@ -228,28 +217,23 @@
             return (
                 <div className="flex flex-col min-h-screen select-none overflow-x-hidden p-0 sm:p-4">
                     {/* 頁首設計 */}
-                    <div className="max-w-[1400px] mx-auto w-full mb-2 sm:mb-4 shadow-lg sm:rounded-lg overflow-hidden flex flex-col sm:flex-row">
-                        <div className="bg-[#eab308] p-3 sm:p-4 flex-1 flex items-center justify-between sm:justify-start">
-                            <h1 className="text-xl sm:text-2xl font-black italic tracking-tighter text-slate-900 uppercase">歐大的投資報表</h1>
-                            <div className="sm:hidden text-[10px] font-mono font-bold text-slate-800">{currentTime.toLocaleTimeString()}</div>
+                    <div className="max-w-[1400px] mx-auto w-full mb-4 shadow-lg rounded-lg overflow-hidden flex flex-col sm:flex-row">
+                        <div className="bg-[#eab308] p-4 flex-1 flex items-center">
+                            <h1 className="text-2xl font-black italic tracking-tighter text-slate-900 uppercase">歐大的投資報表</h1>
                         </div>
-                        <div className="bg-[#1e293b] text-white p-3 sm:p-4 flex gap-4 sm:gap-8 items-center justify-between sm:justify-end">
+                        <div className="bg-[#1e293b] text-white p-4 flex gap-8 items-center justify-end">
                             <div className="text-center">
-                                <div className="text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase mb-0.5 sm:mb-1 leading-none">時間價值</div>
-                                <div className="font-mono-data text-base sm:text-xl font-bold text-emerald-400 leading-none">{topStats.timeValue}</div>
+                                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">時間價值</div>
+                                <div className="font-mono-data text-xl font-bold text-emerald-400">{topStats.timeValue}</div>
                             </div>
                             <div className="text-center">
-                                <div className="text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase mb-0.5 sm:mb-1 leading-none">期貨指數</div>
-                                <div className="flex items-center gap-1 sm:gap-2 leading-none">
-                                    <span className="font-mono-data text-base sm:text-xl font-bold text-emerald-400">{topStats.futureIndex}</span>
-                                    <div className="flex flex-col sm:flex-row items-start sm:items-center sm:gap-1">
-                                        <span className={`text-[10px] sm:text-xs font-bold ${parseFloat(topStats.pointsChange) >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                            {parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}
-                                        </span>
-                                        <span className={`text-[10px] sm:text-xs font-bold ${parseFloat(topStats.percentChange) >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                            ({topStats.percentChange})
-                                        </span>
-                                    </div>
+                                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">期貨指數</div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-mono-data text-xl font-bold text-emerald-400">{topStats.futureIndex}</span>
+                                    <span className={`text-xs font-bold ${parseFloat(topStats.pointsChange) >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                        {parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}
+                                        ({topStats.percentChange})
+                                    </span>
                                 </div>
                             </div>
                             <div className="hidden md:block border-l border-slate-700 pl-4 text-xs font-mono text-slate-400">
@@ -260,20 +244,20 @@
 
                     {/* 警報區塊 */}
                     {isAlerting && (
-                        <div className="max-w-[1400px] mx-auto w-full mb-4 bg-red-600 text-white px-4 py-2 rounded-lg text-center font-black text-xs sm:text-sm animate-pulse shadow-xl flex items-center justify-center gap-4" onDoubleClick={() => setLastStopTimestamp(Date.now())}>
+                        <div className="max-w-[1400px] mx-auto w-full mb-4 bg-red-600 text-white px-4 py-2 rounded-lg text-center font-black text-sm animate-pulse shadow-xl flex items-center justify-center gap-4" onDoubleClick={() => setLastStopTimestamp(Date.now())}>
                             <span>⚠️ 極端警報：數值大偏移</span>
-                            <button className="text-[9px] bg-white text-red-600 px-2 py-0.5 rounded uppercase font-bold">雙擊暫停</button>
+                            <span className="text-[10px] bg-white text-red-600 px-2 py-0.5 rounded uppercase">雙擊暫停音效</span>
                         </div>
                     )}
 
-                    {/* 統一數據表格佈局 */}
+                    {/* 數據表格 */}
                     <div className="max-w-[1400px] mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden border border-slate-200">
                         <div className="overflow-x-auto">
-                            <table className="text-center min-w-[1000px] sm:min-w-full">
+                            <table className="text-center">
                                 <thead>
                                     <tr className="bg-[#0f172a] text-slate-300">
                                         {headers.map((h, i) => (
-                                            <th key={i} className="px-2 sm:px-3 py-2 sm:py-4 text-[10px] sm:text-[11px] font-black uppercase tracking-wider">{h}</th>
+                                            <th key={i} className="px-3 py-4 text-[11px] font-black uppercase tracking-wider">{h}</th>
                                         ))}
                                     </tr>
                                 </thead>
@@ -291,19 +275,19 @@
                                                     return (
                                                         <td key={cIdx} className={`p-0 ${specialStyle}`}>
                                                             {isName && !isLastRow ? (
-                                                                <div className="p-0.5 sm:p-1">
+                                                                <div className="p-1">
                                                                     {link ? (
-                                                                        <a href={link} target="_blank" rel="noopener noreferrer" className="btn-3d-full clickable text-[10px] sm:text-xs">
-                                                                            {cell} <span className="ml-1 opacity-40 text-[9px] sm:text-[10px]">↗</span>
+                                                                        <a href={link} target="_blank" rel="noopener noreferrer" className="btn-3d-full clickable">
+                                                                            {cell} <span className="ml-1 opacity-40 text-[10px]">↗</span>
                                                                         </a>
                                                                     ) : (
-                                                                        <div className="btn-3d-full btn-3d-no-link text-[10px] sm:text-xs">
+                                                                        <div className="btn-3d-full btn-3d-no-link">
                                                                             {cell}
                                                                         </div>
                                                                     )}
                                                                 </div>
                                                             ) : (
-                                                                <div className={`px-2 py-1.5 sm:py-3 text-[10px] sm:text-xs font-bold font-mono-data ${isNegative ? 'text-red-500' : 'text-slate-700'} ${isLastRow ? 'text-xs sm:text-sm' : ''}`}>
+                                                                <div className={`px-2 py-3 text-xs font-bold font-mono-data ${isNegative ? 'text-red-500' : 'text-slate-700'} ${isLastRow ? 'text-sm' : ''}`}>
                                                                     {cell || '0'}
                                                                 </div>
                                                             )}
@@ -318,8 +302,8 @@
                         </div>
                     </div>
                     
-                    <footer className="max-w-[1400px] mx-auto w-full py-6 sm:py-8 px-4 flex justify-between items-center opacity-40">
-                        <p className="text-[10px] font-black tracking-[0.2em] sm:tracking-[0.4em] uppercase">System Live Feed • End of Stream</p>
+                    <footer className="max-w-[1400px] mx-auto w-full py-8 px-4 flex justify-between items-center opacity-40">
+                        <p className="text-[10px] font-black tracking-[0.4em] uppercase">System Live Feed • End of Stream</p>
                         <p className="text-[10px] font-mono font-black text-slate-900">{VERSION}</p>
                     </footer>
                 </div>
