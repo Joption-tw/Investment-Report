@@ -28,7 +28,7 @@
             align-items: center;
             justify-content: center;
             width: 100%;
-            padding: 10px 4px;
+            padding: 8px 4px; /* 手機版預設較扁平 */
             background-color: #eab308; /* amber-500 */
             color: #0f172a;
             font-weight: 900;
@@ -37,6 +37,12 @@
             transition: all 0.1s;
             text-transform: uppercase;
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        @media (min-width: 768px) {
+            .btn-3d-full {
+                padding: 10px 4px;
+            }
         }
 
         .btn-3d-full.clickable:hover {
@@ -73,7 +79,7 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
-        const VERSION = "v1.6.0";
+        const VERSION = "v1.7.0";
 
         const App = () => {
             const [data, setData] = useState([]);
@@ -260,14 +266,14 @@
                         </div>
                     )}
 
-                    {/* 桌面版表格 (md 以上顯示) */}
-                    <div className="hidden md:block max-w-[1400px] mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden border border-slate-200">
+                    {/* 統一數據表格佈局 */}
+                    <div className="max-w-[1400px] mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden border border-slate-200">
                         <div className="overflow-x-auto">
-                            <table className="text-center">
+                            <table className="text-center min-w-[1000px] sm:min-w-full">
                                 <thead>
                                     <tr className="bg-[#0f172a] text-slate-300">
                                         {headers.map((h, i) => (
-                                            <th key={i} className="px-3 py-4 text-[11px] font-black uppercase tracking-wider">{h}</th>
+                                            <th key={i} className="px-2 sm:px-3 py-2 sm:py-4 text-[10px] sm:text-[11px] font-black uppercase tracking-wider">{h}</th>
                                         ))}
                                     </tr>
                                 </thead>
@@ -285,19 +291,19 @@
                                                     return (
                                                         <td key={cIdx} className={`p-0 ${specialStyle}`}>
                                                             {isName && !isLastRow ? (
-                                                                <div className="p-1">
+                                                                <div className="p-0.5 sm:p-1">
                                                                     {link ? (
-                                                                        <a href={link} target="_blank" rel="noopener noreferrer" className="btn-3d-full clickable">
-                                                                            {cell} <span className="ml-1 opacity-40 text-[10px]">↗</span>
+                                                                        <a href={link} target="_blank" rel="noopener noreferrer" className="btn-3d-full clickable text-[10px] sm:text-xs">
+                                                                            {cell} <span className="ml-1 opacity-40 text-[9px] sm:text-[10px]">↗</span>
                                                                         </a>
                                                                     ) : (
-                                                                        <div className="btn-3d-full btn-3d-no-link">
+                                                                        <div className="btn-3d-full btn-3d-no-link text-[10px] sm:text-xs">
                                                                             {cell}
                                                                         </div>
                                                                     )}
                                                                 </div>
                                                             ) : (
-                                                                <div className={`px-2 py-3 text-xs font-bold font-mono-data ${isNegative ? 'text-red-500' : 'text-slate-700'} ${isLastRow ? 'text-sm' : ''}`}>
+                                                                <div className={`px-2 py-1.5 sm:py-3 text-[10px] sm:text-xs font-bold font-mono-data ${isNegative ? 'text-red-500' : 'text-slate-700'} ${isLastRow ? 'text-xs sm:text-sm' : ''}`}>
                                                                     {cell || '0'}
                                                                 </div>
                                                             )}
@@ -311,64 +317,8 @@
                             </table>
                         </div>
                     </div>
-
-                    {/* 手機版卡片佈局 (md 以下顯示) */}
-                    <div className="md:hidden flex flex-col gap-4 p-2 pb-24">
-                        {data.map((row, rIdx) => {
-                            const isLastRow = rIdx === data.length - 1;
-                            if (isLastRow) return (
-                                <div key={rIdx} className="bg-slate-800 text-white p-4 rounded-xl shadow-lg border-2 border-amber-500">
-                                    <div className="text-center font-black uppercase tracking-widest text-xs mb-3 text-amber-500">歐大總績效</div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {headers.slice(3).map((h, i) => (
-                                            <div key={i} className="flex flex-col items-center">
-                                                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">{h}</div>
-                                                <div className={`font-mono-data text-sm font-black ${row[i+3]?.includes('-') ? 'text-red-400' : 'text-emerald-400'}`}>{row[i+3] || '0'}</div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-
-                            return (
-                                <div key={rIdx} className="bg-white rounded-2xl overflow-hidden card-shadow border border-slate-200">
-                                    {/* 卡片標題：名稱按鈕 */}
-                                    <div className="p-2 bg-slate-50 border-b border-slate-100">
-                                        {(() => {
-                                            const link = getLinkUrl(row[0]);
-                                            return link ? (
-                                                <a href={link} target="_blank" rel="noopener noreferrer" className="btn-3d-full clickable">
-                                                    {row[0]} <span className="ml-2 opacity-40">↗</span>
-                                                </a>
-                                            ) : (
-                                                <div className="btn-3d-full btn-3d-no-link">{row[0]}</div>
-                                            );
-                                        })()}
-                                    </div>
-                                    
-                                    {/* 核心數據網格 */}
-                                    <div className="p-4 grid grid-cols-2 gap-y-4 gap-x-2">
-                                        {headers.slice(1).map((h, i) => {
-                                            const cell = row[i+1];
-                                            const specialStyle = getCellStyles(h, cell);
-                                            const isNegative = typeof cell === 'string' && (cell.includes('-') || (cell.startsWith('(') && cell.endsWith(')')));
-                                            
-                                            return (
-                                                <div key={i} className={`flex flex-col ${i % 2 === 0 ? 'items-start' : 'items-end'}`}>
-                                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter mb-1">{h}</span>
-                                                    <span className={`px-2 py-1 rounded-md text-sm font-bold font-mono-data ${specialStyle || (isNegative ? 'text-red-500' : 'text-slate-800')}`}>
-                                                        {cell || '0'}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
                     
-                    <footer className="max-w-[1400px] mx-auto w-full py-8 px-4 flex justify-between items-center opacity-40">
+                    <footer className="max-w-[1400px] mx-auto w-full py-6 sm:py-8 px-4 flex justify-between items-center opacity-40">
                         <p className="text-[10px] font-black tracking-[0.2em] sm:tracking-[0.4em] uppercase">System Live Feed • End of Stream</p>
                         <p className="text-[10px] font-mono font-black text-slate-900">{VERSION}</p>
                     </footer>
