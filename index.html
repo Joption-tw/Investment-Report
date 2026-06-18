@@ -119,10 +119,9 @@
                 else setLoading(true);
                 try {
                     const targetUrl = encodeURIComponent(`${CSV_URL}&t=${Date.now()}`);
-                    const response = await fetch(`https://api.allorigins.win/get?url=${targetUrl}`);
+                    const response = await fetch(`https://corsproxy.io/?url=${targetUrl}`);
                     if (!response.ok) throw new Error('無法讀取數據');
-                    const json = await response.json();
-                    const text = json.contents;
+                    const text = await response.text();
                     if (!text) throw new Error('無法讀取數據');
                     const rawRows = parseCSV(text);
                     if (rawRows.length >= 2) {
