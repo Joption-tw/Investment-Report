@@ -6,7 +6,7 @@
     <title>歐大的投資報表</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
@@ -19,17 +19,18 @@
         * { -webkit-tap-highlight-color: transparent; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div id="root">
-        <div id="loading-screen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background-color:#f8fafc;gap:16px;">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background-color:#f8fafc;gap:16px;">
             <div style="width:48px;height:48px;border:4px solid #e2e8f0;border-top-color:#eab308;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
             <p style="font-family:'Noto Sans TC',sans-serif;font-size:1rem;color:#64748b;margin:0;">載入中，請稍候…</p>
         </div>
-        <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
     </div>
-    <script type="text/babel">
+    <script>
+        const html = htm.bind(React.createElement);
         const { useState, useEffect, useCallback } = React;
 
         const VERSION  = "V2.2 優化版";
@@ -111,14 +112,14 @@
         };
 
         const App = () => {
-            const [data, setData]           = useState([]);
-            const [headers, setHeaders]     = useState([]);
-            const [loading, setLoading]     = useState(true);
-            const [refreshing, setRefreshing] = useState(false);
-            const [error, setError]         = useState(null);
+            const [data, setData]               = useState([]);
+            const [headers, setHeaders]         = useState([]);
+            const [loading, setLoading]         = useState(true);
+            const [refreshing, setRefreshing]   = useState(false);
+            const [error, setError]             = useState(null);
             const [currentTime, setCurrentTime] = useState(new Date());
             const [lastUpdated, setLastUpdated] = useState(null);
-            const [topStats, setTopStats]   = useState({ timeValue: '0.0', futureIndex: '0.0', pointsChange: '0.0', percentChange: '0%' });
+            const [topStats, setTopStats]       = useState({ timeValue: '0.0', futureIndex: '0.0', pointsChange: '0.0', percentChange: '0%' });
 
             const fetchData = useCallback(async (isAuto = false) => {
                 if (isAuto) setRefreshing(true);
@@ -166,17 +167,100 @@
 
             const handleManualRefresh = () => { if (!refreshing) fetchData(true); };
 
-            return (
+            const renderDesktopRows = () => data.map((row, rIdx) => {
+                const cells = row.map((cell, cIdx) => {
+                    const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(headers[cIdx] || '', cell);
+                    let cls = "px-4 py-2.5 text-xs font-bold font-mono-data text-center ";
+                    if (isDisc)              cls += "bg-red-600 text-white animate-pulse";
+                    else if (isAlertExtreme) cls += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
+                    else if (marginClass)    cls += marginClass;
+                    else if (ratioGradient)  cls += ratioGradient;
+                    else if (isNeg)          cls += "text-red-500";
+                    else                     cls += "text-slate-700";
+                    return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
+                });
+                return html`<tr key=${rIdx} className="hover:bg-slate-50 transition-colors">${cells}</tr>`;
+            });
+
+            const renderMobileCards = () => data.map((row, rIdx) => {
+                const cardRows = headers.slice(1).map((h, i) => {
+                    const cell = row[i + 1];
+                    const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(h, cell);
+                    let highlightClass = "";
+                    let textClass = isNeg ? "text-red-500" : "text-slate-800";
+                    if (marginClass)         { highlightClass = marginClass + " rounded"; if (marginClass.includes('text-white')) textClass = "text-white"; }
+                    else if (isAlertExtreme) { highlightClass = ratioGradient + " rounded border-2 border-red-600 shadow-inner"; textClass = "text-red-700"; }
+                    else if (isDisc)         { highlightClass = "bg-red-600 text-white rounded animate-pulse"; textClass = "text-white"; }
+                    else if (ratioGradient)  { highlightClass = ratioGradient + " rounded border border-yellow-400 shadow-sm"; textClass = "text-slate-900"; }
+                    const labelClass = "text-[9px] font-bold uppercase truncate max-w-[60px] leading-none tracking-tighter " + (highlightClass && textClass === "text-white" ? 'text-white' : 'text-slate-400');
+                    return html`
+                        <div key=${i} className=${"flex justify-between items-center border-b border-slate-50 py-1 px-1.5 " + highlightClass}>
+                            <span className=${labelClass}>${h}</span>
+                            <span className=${"text-xs font-mono-data font-black leading-none " + textClass}>${cell || '0'}</span>
+                        </div>`;
+                });
+                return html`
+                    <div key=${rIdx} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                        <div className="bg-slate-900 px-3 py-1.5 flex justify-between items-center">
+                            <span className="text-white font-bold text-xs tracking-tight">${row[0]}</span>
+                            <span className="text-[8px] bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-black shrink-0">#${rIdx + 1}</span>
+                        </div>
+                        <div className="p-2 grid grid-cols-2 gap-y-1 gap-x-2">${cardRows}</div>
+                    </div>`;
+            });
+
+            let mainContent;
+            if (loading && data.length === 0) {
+                mainContent = html`
+                    <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                        <div className="w-8 h-8 border-4 border-slate-200 border-t-yellow-400 rounded-full animate-spin mb-4"></div>
+                        <p className="text-xs font-bold uppercase tracking-widest font-mono">Loading Data...</p>
+                    </div>`;
+            } else if (error) {
+                mainContent = html`
+                    <div className="bg-red-50 border border-red-200 p-6 rounded-xl text-center my-10 max-w-sm mx-auto">
+                        <p className="text-red-600 font-bold mb-4">⚠️ 連線異常</p>
+                        <button onClick=${() => fetchData()} className="px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-bold">重新嘗試</button>
+                    </div>`;
+            } else {
+                mainContent = html`
+                    <div className="max-w-7xl mx-auto pb-20">
+                        <div className="hidden lg:block bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="bg-slate-900 text-slate-300">
+                                            ${headers.map((h, i) => html`<th key=${i} className="px-4 py-3 text-[11px] font-black uppercase tracking-wider text-center border-slate-800">${h}</th>`)}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        ${renderDesktopRows()}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-2">
+                            ${renderMobileCards()}
+                            <div className="col-span-full py-10 text-center opacity-20">
+                                <p className="text-[9px] font-black tracking-[0.4em] uppercase">END OF STREAM</p>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+
+            const pointsChangeFormatted = parseFloat(topStats.pointsChange) > 0 ? '+' + topStats.pointsChange : topStats.pointsChange;
+
+            return html`
                 <div className="flex flex-col min-h-screen bg-slate-50 select-none overflow-x-hidden">
                     <header className="hidden sm:block sticky top-0 bg-slate-900 text-white shadow-lg z-50 border-b border-slate-800">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5">
                             <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${refreshing ? 'bg-yellow-400 animate-pulse' : 'bg-emerald-500'}`}></div>
-                                <span className="text-[9px] font-bold tracking-widest text-slate-400 uppercase">System Active | {VERSION}</span>
+                                <div className=${"w-2 h-2 rounded-full " + (refreshing ? 'bg-yellow-400 animate-pulse' : 'bg-emerald-500')}></div>
+                                <span className="text-[9px] font-bold tracking-widest text-slate-400 uppercase">System Active | ${VERSION}</span>
                             </div>
                             <div className="flex items-center gap-3">
-                                {lastUpdated && <span className="text-[9px] font-mono-data text-slate-500">資料 {formatTime(lastUpdated)}</span>}
-                                <div className="text-[10px] font-mono-data font-bold text-slate-300">{formatTime(currentTime)}</div>
+                                ${lastUpdated && html`<span className="text-[9px] font-mono-data text-slate-500">資料 ${formatTime(lastUpdated)}</span>`}
+                                <div className="text-[10px] font-mono-data font-bold text-slate-300">${formatTime(currentTime)}</div>
                             </div>
                         </div>
                         <div className="flex flex-col md:flex-row md:items-center">
@@ -186,18 +270,18 @@
                             <div className="flex divide-x divide-slate-800 bg-slate-900 border-t border-slate-800 md:border-t-0">
                                 <div className="px-4 py-1.5 flex flex-col items-center justify-center text-center">
                                     <span className="text-[8px] text-slate-500 font-bold uppercase mb-1 leading-none">時間價值</span>
-                                    <span className="text-emerald-400 font-mono-data font-bold text-xs md:text-base leading-none">{topStats.timeValue}</span>
+                                    <span className="text-emerald-400 font-mono-data font-bold text-xs md:text-base leading-none">${topStats.timeValue}</span>
                                 </div>
                                 <div className="px-4 py-1.5 flex flex-col items-center justify-center text-center">
                                     <span className="text-[8px] text-slate-500 font-bold uppercase mb-1 leading-none">期貨指數</span>
                                     <div className="flex items-baseline gap-2">
-                                        <span className="text-emerald-400 font-mono-data font-bold text-xs md:text-base leading-none">{topStats.futureIndex}</span>
-                                        <span className={`text-[11px] font-mono-data font-bold ${getChangeColor(topStats.pointsChange)}`}>{parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}</span>
-                                        <span className={`text-[11px] font-mono-data font-bold ${getChangeColor(topStats.percentChange)}`}>({topStats.percentChange})</span>
+                                        <span className="text-emerald-400 font-mono-data font-bold text-xs md:text-base leading-none">${topStats.futureIndex}</span>
+                                        <span className=${"text-[11px] font-mono-data font-bold " + getChangeColor(topStats.pointsChange)}>${pointsChangeFormatted}</span>
+                                        <span className=${"text-[11px] font-mono-data font-bold " + getChangeColor(topStats.percentChange)}>(${topStats.percentChange})</span>
                                     </div>
                                 </div>
-                                <button onClick={handleManualRefresh} disabled={refreshing} className="px-4 py-1.5 flex flex-col items-center justify-center text-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer">
-                                    <span className={`text-base leading-none ${refreshing ? 'animate-spin inline-block' : ''}`}>↻</span>
+                                <button onClick=${handleManualRefresh} disabled=${refreshing} className="px-4 py-1.5 flex flex-col items-center justify-center text-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer">
+                                    <span className=${"text-base leading-none " + (refreshing ? 'animate-spin inline-block' : '')}>↻</span>
                                     <span className="text-[8px] font-bold uppercase mt-1 leading-none">刷新</span>
                                 </button>
                             </div>
@@ -208,26 +292,26 @@
                         <div className="space-y-1">
                             <div className="flex justify-between items-center bg-slate-900 px-3 py-1.5 shadow-md">
                                 <div className="flex items-center gap-1.5">
-                                    <div className={`w-1.5 h-1.5 rounded-full ${refreshing ? 'bg-yellow-400 animate-pulse' : 'bg-emerald-500'}`}></div>
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">LIVE | {VERSION}</span>
+                                    <div className=${"w-1.5 h-1.5 rounded-full " + (refreshing ? 'bg-yellow-400 animate-pulse' : 'bg-emerald-500')}></div>
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">LIVE | ${VERSION}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    {lastUpdated && <span className="text-[9px] font-mono-data text-slate-500">資料 {formatTime(lastUpdated)}</span>}
-                                    <div className="text-[10px] font-mono-data text-slate-300 font-bold">{formatTime(currentTime)}</div>
-                                    <button onClick={handleManualRefresh} disabled={refreshing} className={`text-slate-400 hover:text-white disabled:opacity-40 text-sm leading-none cursor-pointer ${refreshing ? 'animate-spin inline-block' : ''}`}>↻</button>
+                                    ${lastUpdated && html`<span className="text-[9px] font-mono-data text-slate-500">資料 ${formatTime(lastUpdated)}</span>`}
+                                    <div className="text-[10px] font-mono-data text-slate-300 font-bold">${formatTime(currentTime)}</div>
+                                    <button onClick=${handleManualRefresh} disabled=${refreshing} className=${"text-slate-400 hover:text-white disabled:opacity-40 text-sm leading-none cursor-pointer " + (refreshing ? 'animate-spin inline-block' : '')}>↻</button>
                                 </div>
                             </div>
                             <div className="flex divide-x divide-slate-800 bg-slate-900 overflow-hidden border-b border-slate-800 shadow-md">
                                 <div className="flex-1 p-2 flex flex-col items-center justify-center text-center">
                                     <span className="text-[8px] text-slate-500 font-bold uppercase mb-0.5 leading-none">時間價值</span>
-                                    <span className="text-emerald-400 font-mono-data font-bold text-xs leading-none">{topStats.timeValue}</span>
+                                    <span className="text-emerald-400 font-mono-data font-bold text-xs leading-none">${topStats.timeValue}</span>
                                 </div>
                                 <div className="flex-[1.5] p-2 flex flex-col items-center justify-center text-center">
                                     <span className="text-[8px] text-slate-500 font-bold uppercase mb-0.5 leading-none">期貨指數 / 漲跌</span>
                                     <div className="flex items-center gap-1.5">
-                                        <span className="text-emerald-400 font-mono-data font-bold text-xs leading-none">{topStats.futureIndex}</span>
-                                        <span className={`text-[10px] font-mono-data font-bold ${getChangeColor(topStats.pointsChange)}`}>{parseFloat(topStats.pointsChange) > 0 ? `+${topStats.pointsChange}` : topStats.pointsChange}</span>
-                                        <span className={`text-[10px] font-mono-data font-bold ${getChangeColor(topStats.percentChange)}`}>({topStats.percentChange})</span>
+                                        <span className="text-emerald-400 font-mono-data font-bold text-xs leading-none">${topStats.futureIndex}</span>
+                                        <span className=${"text-[10px] font-mono-data font-bold " + getChangeColor(topStats.pointsChange)}>${pointsChangeFormatted}</span>
+                                        <span className=${"text-[10px] font-mono-data font-bold " + getChangeColor(topStats.percentChange)}>(${topStats.percentChange})</span>
                                     </div>
                                 </div>
                             </div>
@@ -235,88 +319,13 @@
                     </div>
 
                     <main className="p-1 sm:p-4 bg-[#f1f5f9]">
-                        {loading && data.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-                                <div className="w-8 h-8 border-4 border-slate-200 border-t-yellow-400 rounded-full animate-spin mb-4"></div>
-                                <p className="text-xs font-bold uppercase tracking-widest font-mono">Loading Data...</p>
-                            </div>
-                        ) : error ? (
-                            <div className="bg-red-50 border border-red-200 p-6 rounded-xl text-center my-10 max-w-sm mx-auto">
-                                <p className="text-red-600 font-bold mb-4">⚠️ 連線異常</p>
-                                <button onClick={() => fetchData()} className="px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-bold">重新嘗試</button>
-                            </div>
-                        ) : (
-                            <div className="max-w-7xl mx-auto pb-20">
-                                <div className="hidden lg:block bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-left">
-                                            <thead>
-                                                <tr className="bg-slate-900 text-slate-300">
-                                                    {headers.map((h, i) => (
-                                                        <th key={i} className="px-4 py-3 text-[11px] font-black uppercase tracking-wider text-center border-slate-800">{h}</th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {data.map((row, rIdx) => (
-                                                    <tr key={rIdx} className="hover:bg-slate-50 transition-colors">
-                                                        {row.map((cell, cIdx) => {
-                                                            const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(headers[cIdx], cell);
-                                                            let cls = "px-4 py-2.5 text-xs font-bold font-mono-data text-center ";
-                                                            if (isDisc)              cls += "bg-red-600 text-white animate-pulse";
-                                                            else if (isAlertExtreme) cls += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
-                                                            else if (marginClass)    cls += marginClass;
-                                                            else if (ratioGradient)  cls += ratioGradient;
-                                                            else if (isNeg)          cls += "text-red-500";
-                                                            else                     cls += "text-slate-700";
-                                                            return <td key={cIdx} className={cls}>{cell || '0'}</td>;
-                                                        })}
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                                <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    {data.map((row, rIdx) => (
-                                        <div key={rIdx} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
-                                            <div className="bg-slate-900 px-3 py-1.5 flex justify-between items-center">
-                                                <span className="text-white font-bold text-xs tracking-tight">{row[0]}</span>
-                                                <span className="text-[8px] bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-black shrink-0">#{rIdx+1}</span>
-                                            </div>
-                                            <div className="p-2 grid grid-cols-2 gap-y-1 gap-x-2">
-                                                {headers.slice(1).map((h, i) => {
-                                                    const cell = row[i+1];
-                                                    const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(h, cell);
-                                                    let highlightClass = "";
-                                                    let textClass = isNeg ? "text-red-500" : "text-slate-800";
-                                                    if (marginClass) { highlightClass = marginClass + " rounded"; if (marginClass.includes('text-white')) textClass = "text-white"; }
-                                                    else if (isAlertExtreme) { highlightClass = ratioGradient + " rounded border-2 border-red-600 shadow-inner"; textClass = "text-red-700"; }
-                                                    else if (isDisc) { highlightClass = "bg-red-600 text-white rounded animate-pulse"; textClass = "text-white"; }
-                                                    else if (ratioGradient) { highlightClass = ratioGradient + " rounded border border-yellow-400 shadow-sm"; textClass = "text-slate-900"; }
-                                                    return (
-                                                        <div key={i} className={`flex justify-between items-center border-b border-slate-50 py-1 px-1.5 ${highlightClass}`}>
-                                                            <span className={`text-[9px] font-bold uppercase truncate max-w-[60px] leading-none tracking-tighter ${highlightClass && textClass === "text-white" ? 'text-white' : 'text-slate-400'}`}>{h}</span>
-                                                            <span className={`text-xs font-mono-data font-black leading-none ${textClass}`}>{cell || '0'}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    ))}
-                                    <div className="col-span-full py-10 text-center opacity-20">
-                                        <p className="text-[9px] font-black tracking-[0.4em] uppercase">END OF STREAM</p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                        ${mainContent}
                     </main>
-                </div>
-            );
+                </div>`;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(html`<${App} />`);
     </script>
 </body>
 </html>
