@@ -20,6 +20,35 @@
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ===== 手機橫向（打橫）：顯示完整桌面表格，壓縮成滿版一頁 ===== */
+        @media (orientation: landscape) and (max-height: 600px) {
+            /* 用桌面版頁首，隱藏手機版頁首 */
+            header.hidden.sm\:block { display: block !important; }
+            .sm\:hidden { display: none !important; }
+
+            /* 用桌面版表格，隱藏手機版卡片 */
+            .hidden.lg\:block { display: block !important; }
+            .lg\:hidden { display: none !important; }
+
+            /* 頁首排成一行，貼齊截圖版面 */
+            header .flex.flex-col.md\:flex-row { flex-direction: row !important; align-items: center !important; }
+            header h1 { font-size: 1.1rem !important; }
+            header .px-4.py-3 { padding: 0.4rem 1rem !important; }
+
+            /* 版面滿版、去除多餘留白 */
+            main { padding: 4px !important; background: #f1f5f9 !important; }
+            main .max-w-7xl { max-width: 100% !important; }
+            main .rounded-xl { border-radius: 6px !important; }
+            main .overflow-x-auto { overflow-x: visible !important; }
+
+            /* 表格壓縮：字級與內距縮小，11 欄剛好塞滿一頁不用捲動 */
+            main table { width: 100% !important; table-layout: fixed !important; }
+            main table th { padding: 6px 2px !important; font-size: 9px !important; line-height: 1.15 !important; letter-spacing: 0 !important; white-space: normal !important; }
+            main table td { padding: 5px 2px !important; font-size: 9px !important; line-height: 1.1 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+            /* 第一欄（社群暱稱）給多一點寬度 */
+            main table th:first-child, main table td:first-child { width: 11% !important; white-space: normal !important; }
+        }
     </style>
 </head>
 <body>
