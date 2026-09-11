@@ -148,9 +148,11 @@
             const [error, setError]             = useState(null);
             const [currentTime, setCurrentTime] = useState(new Date());
             const [lastUpdated, setLastUpdated] = useState(null);
+            const [countdown, setCountdown]     = useState(10);
             const [topStats, setTopStats]       = useState({ timeValue: '0.0', futureIndex: '0.0', pointsChange: '0.0', percentChange: '0%' });
 
             const fetchData = useCallback(async (isAuto = false) => {
+                setCountdown(10);
                 if (isAuto) setRefreshing(true);
                 else setLoading(true);
                 try {
@@ -188,8 +190,11 @@
 
             useEffect(() => {
                 fetchData();
-                const syncTimer  = setInterval(() => fetchData(true), 30000);
-                const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
+                const syncTimer  = setInterval(() => fetchData(true), 10000);
+                const clockTimer = setInterval(() => {
+                    setCurrentTime(new Date());
+                    setCountdown(c => (c > 0 ? c - 1 : 0));
+                }, 1000);
                 return () => { clearInterval(syncTimer); clearInterval(clockTimer); };
             }, [fetchData]);
 
@@ -288,6 +293,7 @@
                             </div>
                             <div className="flex items-center gap-3">
                                 ${lastUpdated && html`<span className="text-[9px] font-mono-data text-slate-500">資料 ${formatTime(lastUpdated)}</span>`}
+                                <span className="text-[9px] font-mono-data text-slate-500">${refreshing ? '更新中…' : `${countdown}s 後更新`}</span>
                                 <div className="text-[10px] font-mono-data font-bold text-slate-300">${formatTime(currentTime)}</div>
                             </div>
                         </div>
@@ -325,6 +331,7 @@
                                 </div>
                                 <div className="flex items-center gap-2">
                                     ${lastUpdated && html`<span className="text-[9px] font-mono-data text-slate-500">資料 ${formatTime(lastUpdated)}</span>`}
+                                    <span className="text-[9px] font-mono-data text-slate-500">${refreshing ? '更新中…' : `${countdown}s後更新`}</span>
                                     <div className="text-[10px] font-mono-data text-slate-300 font-bold">${formatTime(currentTime)}</div>
                                     <button onClick=${handleManualRefresh} disabled=${refreshing} className=${"text-slate-400 hover:text-white disabled:opacity-40 text-sm leading-none cursor-pointer " + (refreshing ? 'animate-spin inline-block' : '')}>↻</button>
                                 </div>
