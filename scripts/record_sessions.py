@@ -3,8 +3,10 @@
 #   - 盤別：早盤 08:45~13:45、夜盤 15:00~隔日 05:00；一週 10 盤，從週三夜盤開始到下週三早盤
 #   - 每盤存「收盤前最後一筆快照」的獲利金額 / 起始資產（網頁再算每盤增減），另存開盤第一筆當備援
 #   - 百點震幅、週三 / 週五時價（BA / BB）取自示範帳戶試算表（或 sample 的每週存檔）；VIX 取自 sample 的每日存檔
+#   - 另把盤中每一筆快照依週存到 data/series/<週起始日>.json，各帳號網頁（account.html）的走勢圖用
+#     快照來源：「兩分鐘紀錄」分頁（apps-script/two-minute-log.gs，每 2 分鐘）＋「績效表」裡每 10 分鐘的快照
 # 由 .github/workflows/record-sessions.yml 定時執行（只用 Python 標準函式庫，不需安裝套件）
-import csv, io, json, os, re, urllib.request
+import csv, io, json, os, re, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 
 SHEET_ID  = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk'
@@ -13,6 +15,9 @@ DEMO_ID   = '1AsY4_MJipaMp_cNLpyeXTpFGnG0FD4vWJu-SDRdvtME'
 DEMO_GID  = '1823639969'
 SAMPLE    = 'https://joption-tw.github.io/sample/history/'
 OUT       = 'data/sessions.json'
+LOG_SHEET     = '兩分鐘紀錄'
+SERIES_DIR    = 'data/series'
+SERIES_FIELDS = ['pnl', 'rate', 'base', 'asset', 'pts', 'tv', 'ratio', 'delta', 'margin']
 TPE       = timezone(timedelta(hours=8))
 
 # 一週 10 盤：(距週三的天數, 盤別) → 第幾盤；示範帳戶試算表每盤的列範圍（同 demo-performance 的 rowRanges）
@@ -73,9 +78,45 @@ def read_snapshots():
             if name.startswith('歐大總績效'):
                 total = {'pnl': num(c[7]), 'personal': num(c[5]), 'base': sum(a['base'] or 0 for a in accounts)}
                 break
-            accounts.append({'name': clean_name(name), 'pnl': num(c[7]), 'base': num(c[13])})
+            accounts.append({'name': clean_name(name), 'pnl': num(c[7]), 'base': num(c[13]),
+                             'ratio': num(c[4]), 'delta': num(c[5]), 'tv': num(c[6]), 'rate': num(c[8]),
+                             'margin': num(c[10]), 'asset': num(c[12]), 'pts': num(c[14])})
         if total and total['pnl'] is not None and accounts:
             snaps.append({'ts': ts, 'fut': num(r[15]), 'total': total, 'accounts': accounts})
+    return snaps
+
+
+# ── 「兩分鐘紀錄」分頁（apps-script/two-minute-log.gs 每 2 分鐘記一組，保留 7 天）：記錄時間 + 績效表 C~P 欄 ──
+def read_log_snapshots(hours=30):
+    since = (datetime.now(TPE) - timedelta(hours=hours)).strftime('%Y/%m/%d %H:%M:%S')
+    url = (f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&headers=1'
+           f'&sheet={urllib.parse.quote(LOG_SHEET)}&tq={urllib.parse.quote(f"select * where A >= {since!r}")}')
+    try:
+        rows = list(csv.reader(io.StringIO(get(url))))
+    except Exception as e:
+        print('兩分鐘紀錄讀取失敗（還沒安裝的話正常）：', e); return []
+    if not rows or rows[0][:2] != ['記錄時間', '社群暱稱']:
+        print('沒有「兩分鐘紀錄」分頁，略過'); return []
+    groups = {}
+    for r in rows[1:]:
+        if len(r) >= 15 and re.match(r'^\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}$', r[0].strip()):
+            groups.setdefault(r[0].strip(), []).append(r)
+    snaps = []
+    for stamp, group in groups.items():
+        accounts, total = [], None
+        for r in group:
+            name = r[1].strip()
+            if name.startswith('歐大總績效'):
+                total = {'pnl': num(r[6]), 'personal': num(r[4]), 'base': sum(a['base'] or 0 for a in accounts)}
+                break
+            accounts.append({'name': clean_name(name), 'pnl': num(r[6]), 'base': num(r[12]),
+                             'ratio': num(r[3]), 'delta': num(r[4]), 'tv': num(r[5]), 'rate': num(r[7]),
+                             'margin': num(r[9]), 'asset': num(r[11]), 'pts': num(r[13])})
+        if total and total['pnl'] is not None and accounts:
+            ts = datetime.strptime(stamp, '%Y/%m/%d %H:%M:%S').replace(tzinfo=TPE)
+            snaps.append({'ts': ts, 'fut': num(group[0][10]), 'total': total, 'accounts': accounts})
+    snaps.sort(key=lambda s: s['ts'], reverse=True)             # 跟績效表一樣新的在前
+    print(f'兩分鐘紀錄：{len(snaps)} 筆')
     return snaps
 
 
@@ -156,6 +197,39 @@ def market(s):
     return out
 
 
+def save_series(snaps):
+    """各帳號走勢：盤中每一筆快照依週存到 data/series/<週起始日>.json（帳號網頁的走勢圖用）"""
+    by_week = {}
+    for snap in snaps:
+        key = session_of(snap['ts'])
+        if key: by_week.setdefault(week_of(*key).isoformat(), []).append(snap)
+    for week, items in by_week.items():
+        path = f'{SERIES_DIR}/{week}.json'
+        try:
+            with open(path, encoding='utf-8') as f: old = json.load(f)
+        except FileNotFoundError:
+            old = {'t': [], 'fut': [], 'acc': {}}
+        points, names = {}, list(old['acc'])
+        for k, t in enumerate(old['t']):
+            points[t] = {'fut': old['fut'][k], 'acc': {n: {f: d[f][k] for f in SERIES_FIELDS} for n, d in old['acc'].items() if d['pnl'][k] is not None}}
+        seen = set()
+        for snap in items:                      # 試算表新的在上面：同一時間有兩筆時取第一筆
+            t = snap['ts'].strftime('%Y-%m-%d %H:%M:%S')
+            if t in seen: continue
+            seen.add(t)
+            points[t] = {'fut': snap['fut'], 'acc': {a['name']: {f: a[f] for f in SERIES_FIELDS} for a in snap['accounts']}}
+            names += [a['name'] for a in snap['accounts'] if a['name'] not in names]
+        times = sorted(points)
+        data = {'week': week, 't': times, 'fut': [points[t]['fut'] for t in times],
+                'acc': {n: {f: [points[t]['acc'].get(n, {}).get(f) for t in times] for f in SERIES_FIELDS} for n in names}}
+        if data == {**old, 'week': week}: continue
+        os.makedirs(SERIES_DIR, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+            f.write('\n')
+        print(f'走勢 {path}：{len(times)} 筆')
+
+
 def main():
     now = datetime.now(TPE)
     try:
@@ -164,9 +238,12 @@ def main():
         store = {'sessions': []}
     by_id = {s['id']: s for s in store['sessions']}
 
+    snaps = read_log_snapshots() + read_snapshots()
+    save_series(snaps)
+
     # 每一盤：收盤前最後一筆（同時間有兩筆時取上面那筆＝較新）與開盤第一筆
     last, first = {}, {}
-    for snap in read_snapshots():
+    for snap in snaps:
         key = session_of(snap['ts'])
         if not key: continue
         if key not in last or snap['ts'] > last[key]['ts']:   last[key] = snap
@@ -182,11 +259,14 @@ def main():
         at = snap['ts'].strftime('%Y-%m-%d %H:%M:%S')
         if old.get('at', '') > at: continue      # 已存的比較新（快照已被試算表捲掉時不會覆蓋）
         op = first[(date, typ)]
+        open_ = {'at': op['ts'].strftime('%Y-%m-%d %H:%M:%S'), 'total': op['total']['pnl'],
+                 'accounts': {a['name']: a['pnl'] for a in op['accounts']}}
+        if old.get('open') and old['open']['at'] <= open_['at']: open_ = old['open']   # 較早的快照捲掉了，保留已存的開盤第一筆
         by_id[sid] = {
             'id': sid, 'week': week.isoformat(), 'slot': slot, 'date': date.isoformat(), 'type': typ,
-            'at': at, 'fut': snap['fut'], 'total': snap['total'], 'accounts': snap['accounts'],
-            'open': {'at': op['ts'].strftime('%Y-%m-%d %H:%M:%S'), 'total': op['total']['pnl'],
-                     'accounts': {a['name']: a['pnl'] for a in op['accounts']}},
+            'at': at, 'fut': snap['fut'], 'total': snap['total'],
+            'accounts': [{'name': a['name'], 'pnl': a['pnl'], 'base': a['base']} for a in snap['accounts']],
+            'open': open_,
             'market': old.get('market'),
         }
         print('存', sid, at, '眾人獲利', snap['total']['pnl'])

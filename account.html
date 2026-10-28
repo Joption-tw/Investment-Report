@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>帳號績效 · 歐大的投資報表</title>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <script src="common.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        html, body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
+        body { font-family: 'Noto Sans TC', Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+        .font-mono-data, .stat-value { font-family: Arial, sans-serif; }
+        .glass-card { background: rgba(255, 255, 255, 0.98); border: 1px solid #e2e8f0; border-radius: 0.75rem; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1); }
+        table { border-collapse: separate; border-spacing: 0; }
+        th, td { border: 1px solid #e2e8f0 !important; }
+        #performance-chart { height: 440px; width: 100%; }
+        @media (min-width: 768px) { #performance-chart { height: 560px; } }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .session-btn { width: 100%; padding: 0.45rem 0.25rem; border-radius: 0.4rem; font-size: 11px; font-weight: 800; border: 1px solid #e2e8f0;
+                       background: white; color: #64748b; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; user-select: none; transition: all 150ms; }
+        .session-btn.active { background: #f97316; color: white; border-color: #ea580c; transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(249, 115, 22, 0.2); }
+        .session-btn.night.active { background: #1e293b; border-color: #0f172a; }
+        .mode-toggle { display: flex; background: #f1f5f9; padding: 2px; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .mode-btn { padding: 5px 12px; font-size: 12px; font-weight: 900; border-radius: 6px; cursor: pointer; color: #64748b; white-space: nowrap; transition: all 0.2s; }
+        .mode-btn.active.l-idx { background: #2563eb; color: white; }
+        .mode-btn.active.l-tot { background: #475569; color: white; }
+        .mode-btn.active.r-prf { background: #e11d48; color: white; }
+        .mode-btn.active.r-tmv { background: #9333ea; color: white; }
+        @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .live-indicator { animation: pulse-soft 2s infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;">
+            <div style="width:48px;height:48px;border:4px solid #e2e8f0;border-top-color:#eab308;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+            <p style="font-family:'Noto Sans TC',sans-serif;color:#64748b;margin:0;">載入中，請稍候…</p>
+        </div>
+    </div>
+    <script>
+        // 單一帳號的績效頁：account.html?id=<代號>（代號見 common.js 的 ACCOUNTS），版面參考 sample（示範帳戶即時績效）
+        // 走勢：該帳號每 2 分鐘的「兩分鐘紀錄」＋績效表每 10 分鐘的快照（試算表只留最近的，更早的由 GitHub Actions 存到 data/series/<週>.json）
+        //       期指 / 週三、週五時價取自示範帳戶試算表（每 2 分鐘）
+        const { useState, useEffect, useCallback, useRef } = React;
+        const params = new URLSearchParams(location.search);
+        const ACCT = ACCOUNTS.find(a => a.id === params.get('id')) || accountOf(params.get('name'));
+
+        const AXIS_COLORS = { idx: '#2563eb', tot: '#475569', prf: '#e11d48', ba: '#ef4444', bb: '#10b981' };
+
+        const PerfChart = ({ acc, demo, range, axis, wholeWeek }) => {
+            const ref = useRef(null), chart = useRef(null);
+            useEffect(() => {
+                chart.current = echarts.init(ref.current);
+                const onResize = () => chart.current && chart.current.resize();
+                window.addEventListener('resize', onResize);
+                return () => { window.removeEventListener('resize', onResize); chart.current.dispose(); };
+            }, []);
+            useEffect(() => {
+                const [min, max] = range;
+                const a = acc.filter(p => p.t >= min && p.t <= max), d = demo.filter(p => p.t >= min && p.t <= max);
+                const lc = (axis.idx ? 1 : 0) + (axis.tot ? 1 : 0), rc = (axis.prf ? 1 : 0) + (axis.tmv ? 1 : 0);
+                const line = (name, yAxisIndex, data, color, extra = {}) => ({ name, type: 'line', yAxisIndex, data, showSymbol: false, connectNulls: true,
+                    lineStyle: { width: 2, color }, itemStyle: { color }, emphasis: { disabled: true }, ...extra });
+                const fmt = (v, name) => v === null || v === undefined ? '—' : name === '獲利率' ? `${v.toFixed(2)}%` : Math.round(v).toLocaleString();
+                chart.current.setOption({
+                    animation: false,
+                    textStyle: { fontFamily: 'Arial' },
+                    grid: { left: lc * 55 + 15, right: rc * 55 + 15, top: 30, bottom: 70 },
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, confine: true,
+                        formatter: ps => ps.length ? `<b>${mdhm(ps[0].value[0])}</b><br>` + ps.map(p => `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], p.seriesName)}</b>`).join('<br>') : '' },
+                    xAxis: { type: 'time', min, max, splitLine: { show: false },
+                        axisLabel: { hideOverlap: true, color: '#64748b', fontWeight: 'bold', formatter: v => wholeWeek ? mdhm(v).replace(' ', '\n') : hhmm(v) } },
+                    yAxis: [
+                        { type: 'value', name: '期指', position: 'left', show: axis.idx, scale: true, axisLabel: { color: AXIS_COLORS.idx, fontWeight: 'bold', fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } } },
+                        { type: 'value', name: '總點', position: 'left', offset: axis.idx ? 55 : 0, show: axis.tot, min: 0, axisLabel: { color: AXIS_COLORS.tot, fontWeight: 'bold', fontSize: 10 }, splitLine: { show: false } },
+                        { type: 'value', name: '獲利%', position: 'right', show: axis.prf, scale: true, axisLabel: { color: AXIS_COLORS.prf, fontWeight: 'bold', fontSize: 10, formatter: v => `${v}%` }, splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } } },
+                        { type: 'value', name: '時價', position: 'right', offset: axis.prf ? 55 : 0, show: axis.tmv, scale: true, axisLabel: { color: '#9333ea', fontWeight: 'bold', fontSize: 10 }, splitLine: { show: false } }
+                    ],
+                    dataZoom: [
+                        // 滾輪留給頁面捲動：電腦按住 Ctrl + 滾輪縮放、拖曳平移；手機只用下方拉桿
+                        { type: 'inside', xAxisIndex: 0, start: 0, end: 100, filterMode: 'none', disabled: window.innerWidth < 768,
+                          zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: true },
+                        { type: 'slider', xAxisIndex: 0, start: 0, end: 100, filterMode: 'none', bottom: 8, height: 24, showDetail: false, brushSelect: false }
+                    ],
+                    series: [
+                        line('期指', 0, axis.idx ? d.map(p => [p.t, p.fut]) : [], AXIS_COLORS.idx, { lineStyle: { width: 1.5, color: AXIS_COLORS.idx } }),
+                        line('總點數', 1, axis.tot ? a.map(p => [p.t, p.pts]) : [], AXIS_COLORS.tot, { step: 'end', areaStyle: { color: 'rgba(71,85,105,0.08)' } }),
+                        line('獲利率', 2, axis.prf ? a.map(p => [p.t, p.rate]) : [], AXIS_COLORS.prf, { showSymbol: a.length <= 150, symbolSize: 4, z: 5, lineStyle: { width: 2.5, color: AXIS_COLORS.prf }, areaStyle: { color: 'rgba(225,29,72,0.08)' },
+                            markLine: axis.prf ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined }),
+                        line('週三時價', 3, axis.tmv ? d.map(p => [p.t, p.ba]) : [], AXIS_COLORS.ba, { lineStyle: { width: 1.5, color: AXIS_COLORS.ba } }),
+                        line('週五時價', 3, axis.tmv ? d.map(p => [p.t, p.bb]) : [], AXIS_COLORS.bb, { lineStyle: { width: 1.5, color: AXIS_COLORS.bb } })
+                    ]
+                }, true);
+            }, [acc, demo, range, axis, wholeWeek]);
+            return html`<div id="performance-chart" ref=${ref}></div>`;
+        };
+
+        const Stat = ({ label, color, children, sub }) => html`
+            <div className=${"glass-card py-1.5 px-2 border-l-4 flex flex-col justify-center min-h-[54px] " + color}>
+                <p className="text-[9px] font-black text-slate-400 leading-tight mb-0.5">${label}</p>
+                <div className="text-base sm:text-lg font-black stat-value leading-none">${children}</div>
+                ${sub && html`<p className="text-[9px] sm:text-[10px] font-bold leading-none mt-1">${sub}</p>`}
+            </div>`;
+
+        const App = () => {
+            const name = ACCT ? ACCT.name : null;
+            const [sessions, setSessions] = useState([]);
+            const [snaps, setSnaps]       = useState([]);
+            const [series, setSeries]     = useState({});   // 週 → data/series 存檔
+            const [demo, setDemo]         = useState({});   // 週 → { market, series }
+            const [vix, setVix]           = useState(null);
+            const [viewWeek, setViewWeek] = useState('');
+            const [sel, setSel]           = useState(null); // 盤 0~9、'week' = 整週、null = 最新一盤
+            const [axis, setAxis]         = useState({ idx: false, tot: true, prf: true, tmv: true });
+            const [updated, setUpdated]   = useState(null);
+            const [loading, setLoading]   = useState(true);
+            const [copied, setCopied]     = useState(false);
+
+            const currentWeek = snaps[0] ? snaps[0].week : slotAt(tpeNow()).week;
+            const week = viewWeek || currentWeek;
+            const isCurrent = week === currentWeek;
+
+            const getJSON = url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null);
+            const getText = url => fetch(url).then(r => r.ok ? r.text() : '').catch(() => '');
+
+            const loadLive = useCallback(async () => {
+                const t = Date.now();
+                const since = new Date(tpeNow().getTime() - 3 * 3600e3).toISOString().slice(0, 19).replace('T', ' ').replace(/-/g, '/');
+                const [s, sn, lg, v] = await Promise.all([getJSON(`${SESSIONS_URL}?t=${t}`), getText(`${SNAPS_URL}&t=${t}`), getText(`${LOG_URL(since)}&t=${t}`), getJSON(VIX_URL)]);
+                if (s) setSessions(s.sessions || []);
+                if (sn || lg) setSnaps([...(lg ? parseLog(parseCSV(lg)) : []), ...(sn ? parseSnapshots(parseCSV(sn)) : [])].sort((a, b) => b.t - a.t));
+                setVix(parseVix(v));
+                setUpdated(new Date());
+                setLoading(false);
+            }, []);
+            const loadWeek = useCallback(async (w, live) => {
+                const t = Date.now();
+                const [s, d] = await Promise.all([getJSON(`${SERIES_URL(w)}?t=${t}`), getText(live ? `${DEMO_URL}&t=${t}` : DEMO_HISTORY(w))]);
+                setSeries(prev => ({ ...prev, [w]: s }));
+                let parsed = d ? parseDemo(parseCSV(d), w) : null;
+                if (!parsed && live) { const h = await getText(DEMO_HISTORY(w)); parsed = h ? parseDemo(parseCSV(h), w) : null; }
+                setDemo(prev => ({ ...prev, [w]: parsed }));
+            }, []);
+
+            useEffect(() => {
+                if (!name) return;
+                document.title = `${name} 績效 · 歐大的投資報表`;
+                loadLive();
+                const timer = setInterval(loadLive, 60000);
+                return () => clearInterval(timer);
+            }, [name, loadLive]);
+            useEffect(() => {
+                if (!name) return;
+                loadWeek(week, isCurrent);
+                if (!isCurrent) return;
+                const timer = setInterval(() => loadWeek(week, true), 120000);
+                return () => clearInterval(timer);
+            }, [name, week, isCurrent, loadWeek]);
+
+            if (!name) return html`
+                <div className="max-w-xl mx-auto p-6 space-y-4">
+                    <h1 className="text-2xl font-black text-slate-800">找不到這個帳號</h1>
+                    <div className="glass-card p-4 grid grid-cols-2 gap-2">
+                        ${ACCOUNTS.map(a => html`<a key=${a.id} href=${accountUrl(a)} className="px-3 py-2 rounded-lg border-2 border-blue-200 bg-blue-50/40 font-black text-slate-700 hover:border-blue-500">${a.name}</a>`)}
+                    </div>
+                    <a href="./" className="text-blue-600 font-bold">← 回總表</a>
+                </div>`;
+
+            // 該帳號本週走勢：存檔 + 試算表裡還留著的快照（同一時間以試算表為準）
+            const acc = (() => {
+                const map = new Map();
+                const s = series[week];
+                if (s && s.acc && s.acc[name]) {
+                    const a = s.acc[name];
+                    s.t.forEach((ts, k) => {
+                        if (a.pnl[k] === null) return;
+                        const t = wallMs(ts);
+                        map.set(t, { t, slot: slotAt(new Date(t)).slot, pnl: a.pnl[k], rate: a.rate[k], base: a.base[k], asset: a.asset[k], pts: a.pts[k], tv: a.tv[k], ratio: a.ratio[k], delta: a.delta[k], margin: a.margin[k] });
+                    });
+                }
+                snaps.filter(x => x.week === week).forEach(x => {
+                    const a = x.accounts.find(y => y.name === name);
+                    if (a && a.pnl !== null) map.set(x.t, { ...a, t: x.t, slot: x.slot });
+                });
+                const pts = [...map.values()].sort((p, q) => p.t - q.t);
+                // 週三夜盤起始資產重設前的點還是上週的累積，不畫
+                const zero = pts.findIndex(p => p.slot === 0 && p.pnl === 0);
+                return zero > 0 ? pts.filter((p, k) => k >= zero || p.slot !== 0) : pts;
+            })();
+            const demoWeek = demo[week] || null;
+
+            const views = sessions.map(s => accountView(s, name)).filter(Boolean);
+            const latestSnap = isCurrent && snaps[0] ? accountView(snaps[0], name) : null;
+            const rows = buildWeek(week, views, latestSnap ? { ...latestSnap, live: true } : null, (demoWeek && demoWeek.market) || {}, isCurrent ? vix : null);
+            const sum = summarize(rows);
+            const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week)])].sort().reverse();
+
+            const autoSel = sum.lastRow ? sum.lastRow.i : (rows.find(r => r.live) || {}).i || 0;
+            const cur = sel === null ? autoSel : sel;
+            const wholeWeek = cur === 'week';
+            const row = wholeWeek ? null : rows[cur];
+            const range = wholeWeek ? [wallMs(slotOpen(week, 0)), wallMs(slotEnd(week, 9))] : [wallMs(slotOpen(week, cur)), wallMs(slotEnd(week, cur))];
+            const last = acc[acc.length - 1] || null;
+            const m = row ? row.market : {};
+            const chgSub = r => r && r.many ? html`<span className=${r.chg >= 0 ? 'text-red-500' : 'text-emerald-500'}>${r.chg > 0 ? '+' : ''}${Math.round(r.chg).toLocaleString()} (${sgnPct(r.pct)})</span>` : null;
+            const pick = i => setSel(i);
+
+            const copyLink = () => {
+                const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1500); };
+                if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done).catch(() => {});
+            };
+            const shortUrl = `${location.host}${location.pathname}?id=${ACCT.id}`;
+
+            return html`
+                <div className="max-w-[1500px] mx-auto space-y-2 sm:space-y-3 p-1.5 sm:p-4">
+                    <header className="glass-card px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:grid sm:grid-cols-[auto_1fr_auto] items-center gap-3">
+                        <a href="./" className="self-start sm:self-center inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-900 text-yellow-400 font-black text-xs hover:bg-slate-800">← 總表</a>
+                        <div className="text-center">
+                            <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">${name}<span className="text-slate-400 font-bold text-lg sm:text-2xl ml-2">即時績效</span></h1>
+                            <div className="flex items-center justify-center gap-2 flex-wrap mt-1">
+                                <span className="text-[10px] sm:text-xs font-bold text-slate-400 tracking-widest">歐大的投資報表 · 雙賣平衡</span>
+                                ${isCurrent && html`<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-600 live-indicator"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> LIVE</span>`}
+                                <button onClick=${copyLink} title="複製這個帳號的網址" className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 text-[11px] font-bold max-w-full truncate">
+                                    🔗 ${copied ? '已複製網址' : shortUrl}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex sm:flex-col items-center sm:items-end gap-2">
+                            <span className="text-[10px] font-bold text-slate-400">${updated ? `更新 ${updated.toLocaleTimeString()}` : '--:--:--'}</span>
+                            <button onClick=${() => { loadLive(); loadWeek(week, isCurrent); }} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 active:scale-95 text-white rounded-lg font-bold text-xs">↻ 同步數據</button>
+                        </div>
+                    </header>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 sm:gap-2 text-center">
+                        <${Stat} label="本週獲利" color="border-l-rose-500" sub=${last && html`<span className=${toneOf(last.pnl)}>${sgnInt(last.pnl)}</span>`}>
+                            <span className=${last ? toneOf(last.rate) : 'text-slate-300'}>${last && last.rate !== null ? sgnPct(last.rate) : '--'}</span>
+                        <//>
+                        <${Stat} label=${wholeWeek ? '本週勝敗' : `當盤績效（${row.def.label}）`} color="border-l-amber-500"
+                                 sub=${row && row.pnl !== undefined && html`<span className=${toneOf(row.pnl)}>${sgnInt(row.pnl)}</span>`}>
+                            ${wholeWeek ? html`<span><span className="text-red-600">${sum.win}勝</span> <span className="text-emerald-600">${sum.lose}敗</span></span>`
+                              : row && row.rate !== undefined && row.rate !== null ? html`<span className=${toneOf(row.rate)}>${sgnPct(row.rate)}</span>` : html`<span className="text-slate-300">--</span>`}
+                        <//>
+                        <${Stat} label="百點震幅" color="border-l-blue-500"><span className="text-slate-800">${m.swing !== undefined ? fmtInt(m.swing) : '--'}</span><//>
+                        <${Stat} label="週三時價 (BA)" color="border-l-red-500" sub=${chgSub(m.ba)}><span className="text-red-600">${m.ba ? fmtInt(m.ba.last) : '--'}</span><//>
+                        <${Stat} label="週五時價 (BB)" color="border-l-green-500" sub=${chgSub(m.bb)}><span className="text-green-600">${m.bb ? fmtInt(m.bb.last) : '--'}</span><//>
+                        <${Stat} label="資產" color="border-l-slate-500" sub=${last && last.base && html`<span className="text-slate-400">起始 ${fmtInt(last.base)}</span>`}><span className="text-slate-800">${last && last.asset ? fmtInt(last.asset) : '--'}</span><//>
+                        <${Stat} label="保證金剩餘比率" color="border-l-indigo-500"><span className=${last && last.margin !== null && last.margin <= 40 ? 'text-red-600' : 'text-slate-800'}>${last && last.margin !== null ? `${last.margin}%` : '--'}</span><//>
+                        <${Stat} label="買權比值 / 總點數" color="border-l-yellow-400" sub=${last && last.pts !== null && html`<span className="text-slate-500">總點數 ${fmtInt(last.pts)}</span>`}>
+                            <span className="text-slate-800">${last && last.ratio !== null ? last.ratio.toFixed(2) : '--'}</span>
+                        <//>
+                    </div>
+
+                    <div className="glass-card p-1 sm:p-1.5">
+                        <div className="grid grid-cols-6 md:grid-cols-11 gap-1">
+                            ${rows.map(r => {
+                                const res = r.pending ? null : resultOf(r.pnl);
+                                return html`
+                                    <button key=${r.i} onClick=${() => pick(r.i)} className=${"session-btn" + (r.def.type === 'N' ? ' night' : '') + (cur === r.i ? ' active' : '')}>
+                                        <span>${r.def.label}</span>
+                                        <span className=${"text-[9px] leading-none " + (cur === r.i ? 'text-white/80' : res === 'win' ? 'text-red-600' : res === 'lose' ? 'text-emerald-600' : 'text-slate-300')}>
+                                            ${res ? `${RESULT[res].text} ${sgnPct(r.rate)}` : r.state ? '進行中' : mdLabel(r.date)}
+                                        </span>
+                                    </button>`;
+                            })}
+                            <button onClick=${() => pick('week')} className=${"session-btn" + (wholeWeek ? ' active' : '')}><span>整週</span><span className="text-[9px] leading-none">${mdLabel(rows[0].date)}~${mdLabel(rows[9].date)}</span></button>
+                        </div>
+                    </div>
+
+                    <div className="glass-card p-2 md:p-4">
+                        <div className="flex flex-col lg:flex-row justify-between items-center mb-3 gap-3 px-1">
+                            <div className="flex flex-col gap-1 w-full lg:w-auto">
+                                <span className="text-[9px] font-black text-slate-400 ml-1">左軸顯示</span>
+                                <div className="mode-toggle">
+                                    <div className=${"mode-btn flex-1 text-center l-idx" + (axis.idx ? ' active' : '')} onClick=${() => setAxis({ ...axis, idx: !axis.idx })}>期指</div>
+                                    <div className=${"mode-btn flex-1 text-center l-tot" + (axis.tot ? ' active' : '')} onClick=${() => setAxis({ ...axis, tot: !axis.tot })}>總點數</div>
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap justify-center items-center gap-3 sm:gap-4 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 min-h-[40px] text-[11px] font-black text-slate-700">
+                                ${axis.idx && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.idx }}></span>期指</span>`}
+                                ${axis.tot && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.tot }}></span>總點數</span>`}
+                                ${axis.prf && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.prf }}></span>獲利率</span>`}
+                                ${axis.tmv && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.ba }}></span>週三</span><span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.bb }}></span>週五</span>`}
+                            </div>
+                            <div className="flex flex-col gap-1 w-full lg:w-auto lg:items-end">
+                                <span className="text-[9px] font-black text-slate-400 mr-1 text-right">右軸顯示</span>
+                                <div className="mode-toggle">
+                                    <div className=${"mode-btn flex-1 text-center r-prf" + (axis.prf ? ' active' : '')} onClick=${() => setAxis({ ...axis, prf: !axis.prf })}>獲利率</div>
+                                    <div className=${"mode-btn flex-1 text-center r-tmv" + (axis.tmv ? ' active' : '')} onClick=${() => setAxis({ ...axis, tmv: !axis.tmv })}>時間價值</div>
+                                </div>
+                            </div>
+                        </div>
+                        ${loading ? html`<div className="h-[440px] flex items-center justify-center text-slate-400 font-bold text-sm">資料同步中…</div>`
+                                  : html`<${PerfChart} acc=${acc} demo=${(demoWeek && demoWeek.series) || []} range=${range} axis=${axis} wholeWeek=${wholeWeek} />`}
+                        ${!loading && !acc.some(p => p.t >= range[0] && p.t <= range[1]) && html`<p className="text-center text-xs font-bold text-slate-400 -mt-2 pb-2">這一盤還沒有這個帳號的走勢資料</p>`}
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
+                        <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                            <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`}</span></h2>
+                            <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, sum)}</span>
+                            <label className="ml-auto flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-slate-400">歷史週次
+                                <select value=${viewWeek} onChange=${e => { setViewWeek(e.target.value); setSel(null); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs font-bold text-white cursor-pointer">
+                                    ${weeks.map(w => html`<option key=${w} value=${w === currentWeek ? '' : w}>${w === currentWeek ? '本週（即時）' : `${mdLabel(w)} 週`}</option>`)}
+                                </select>
+                            </label>
+                        </div>
+                        <${WinStrip} rows=${rows} selected=${cur} onPick=${pick} />
+                        <${SessionTable} rows=${rows} showPersonal=${false} selected=${cur} onPick=${pick} />
+                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換上方圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。<span className="sm:hidden">表格可左右滑動。</span></p>
+                    </div>
+
+                    <div className="glass-card px-3 sm:px-5 py-3">
+                        <p className="text-[11px] font-black text-slate-500 mb-2">其他帳號</p>
+                        <div className="flex flex-wrap gap-1.5">
+                            ${ACCOUNTS.map(a => html`<a key=${a.id} href=${accountUrl(a)} className=${"px-3 py-1.5 rounded-lg border-2 text-xs font-black " + (a.id === ACCT.id ? 'border-orange-400 bg-orange-50 text-orange-600' : 'border-blue-200 bg-blue-50/40 text-slate-700 hover:border-blue-500')}>${a.name}</a>`)}
+                        </div>
+                    </div>
+                </div>`;
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+    </script>
+</body>
+</html>

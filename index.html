@@ -8,6 +8,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="common.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -59,7 +60,6 @@
         </div>
     </div>
     <script>
-        const html = htm.bind(React.createElement);
         const { useState, useEffect, useCallback } = React;
 
         const VERSION  = "V2.2 優化版";
@@ -75,23 +75,6 @@
         const MARGIN_HIGH   = 20;
         const MARGIN_MED    = 30;
         const MARGIN_LOW    = 40;
-
-        const parseCSV = (text) => {
-            const lines = text.split(/\r?\n/);
-            return lines.filter(line => line.trim() !== '').map(line => {
-                const result = [];
-                let cur = ''; let inQuote = false;
-                for (let i = 0; i < line.length; i++) {
-                    const char = line[i];
-                    if (char === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-                    else if (char === '"') inQuote = !inQuote;
-                    else if (char === ',' && !inQuote) { result.push(cur); cur = ''; }
-                    else cur += char;
-                }
-                result.push(cur);
-                return result;
-            });
-        };
 
         const isNegative = (val) => {
             if (typeof val !== 'string') return false;
@@ -210,6 +193,8 @@
                     else if (ratioGradient)  cls += ratioGradient;
                     else if (isNeg)          cls += "text-red-500";
                     else                     cls += "text-slate-700";
+                    const acct = cIdx === 0 && accountOf(cell);
+                    if (acct) return html`<td key=${cIdx} className=${cls}><a href=${accountUrl(acct)} title="看這個帳號的獨立績效頁" className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${cell}</a></td>`;
                     return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
                 });
                 return html`<tr key=${rIdx} className="hover:bg-slate-50 transition-colors">${cells}</tr>`;
@@ -235,7 +220,9 @@
                 return html`
                     <div key=${rIdx} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                         <div className="bg-slate-900 px-3 py-1.5 flex justify-between items-center">
-                            <span className="text-white font-bold text-xs tracking-tight">${row[0]}</span>
+                            ${accountOf(row[0])
+                                ? html`<a href=${accountUrl(accountOf(row[0]))} className="text-white font-bold text-xs tracking-tight underline decoration-yellow-400 underline-offset-2">${row[0]} ›</a>`
+                                : html`<span className="text-white font-bold text-xs tracking-tight">${row[0]}</span>`}
                             <span className="text-[8px] bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-black shrink-0">#${rIdx + 1}</span>
                         </div>
                         <div className="p-2 grid grid-cols-2 gap-y-1 gap-x-2">${cardRows}</div>
@@ -360,161 +347,7 @@
                 </div>`;
         };
 
-        // ===== 每盤績效表：一週 10 盤，每一盤的勝敗 =====
-        // 收完的盤：GitHub Actions（scripts/record_sessions.py）存到 data/sessions.json
-        // 進行中的盤：即時讀試算表上方的總表（C2:P14）；百點震幅 / BA / BB 讀示範帳戶試算表，VIX 讀 demo-performance 的 /api/vix
-        // 每盤獲利 = 本盤收盤的本週累積獲利 − 上一盤收盤的本週累積獲利（週三夜盤是一週第一盤，起始資產重設後從 0 起算）
-        const SESSIONS_URL = 'data/sessions.json';
-        const LIVE_URL     = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}&range=C2:P14`;
-        const DEMO_URL     = 'https://docs.google.com/spreadsheets/d/1AsY4_MJipaMp_cNLpyeXTpFGnG0FD4vWJu-SDRdvtME/export?format=csv&gid=1823639969';
-        const VIX_URL      = 'https://demo-performance.vercel.app/api/vix';
-        const SLOT_DEFS = [
-            { label: '週三晚', short: '三晚', off: 0, type: 'N' }, { label: '週四早', short: '四早', off: 1, type: 'D' },
-            { label: '週四晚', short: '四晚', off: 1, type: 'N' }, { label: '週五早', short: '五早', off: 2, type: 'D' },
-            { label: '週五晚', short: '五晚', off: 2, type: 'N' }, { label: '週一早', short: '一早', off: 5, type: 'D' },
-            { label: '週一晚', short: '一晚', off: 5, type: 'N' }, { label: '週二早', short: '二早', off: 6, type: 'D' },
-            { label: '週二晚', short: '二晚', off: 6, type: 'N' }, { label: '週三早', short: '三早', off: 7, type: 'D' }
-        ];
-        // 示範帳戶試算表每盤的列範圍（同 demo-performance）
-        const DEMO_ROWS = [[2, 419], [420, 569], [570, 989], [990, 1139], [1140, 1559], [1560, 1709], [1710, 2129], [2130, 2279], [2280, 2699], [2700, 2849]];
-
-        // 時間一律用台灣時間：Date 的 UTC 欄位 = 台灣時間
-        const tpeNow  = () => new Date(Date.now() + 8 * 3600e3);
-        const ymd     = d => d.toISOString().slice(0, 10);
-        const addDays = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return ymd(d); };
-        const mdLabel = s => `${+s.slice(5, 7)}/${s.slice(8, 10)}`;
-        const toNum   = v => { const m = String(v || '').match(/-?[\d,]*\.?\d+/); return m ? parseFloat(m[0].replace(/,/g, '')) : null; };
-        const weekOf  = (date, type) => {
-            const wd = new Date(date + 'T00:00:00Z').getUTCDay();
-            if (type === 'N' && wd === 3) return date;
-            return addDays(date, -(((wd - 3 + 7) % 7) || 7));
-        };
-        // 某個時間點屬於哪一盤（收盤後到下一盤前的空檔算剛收的那盤；週末算週五夜盤）
-        const slotAt = (t) => {
-            const m = t.getUTCHours() * 60 + t.getUTCMinutes(), today = ymd(t);
-            const date = m < 8 * 60 + 45 ? addDays(today, -1) : today;
-            const type = m < 8 * 60 + 45 || m >= 15 * 60 ? 'N' : 'D';
-            const week = weekOf(date, type);
-            const off = Math.round((new Date(date) - new Date(week)) / 864e5);
-            const slot = SLOT_DEFS.findIndex(s => s.off === off && s.type === type);
-            return { week, slot: slot === -1 ? 4 : slot };
-        };
-        const slotDate = (week, i) => addDays(week, SLOT_DEFS[i].off);
-        const slotEnd  = (week, i) => SLOT_DEFS[i].type === 'D' ? `${slotDate(week, i)} 13:45` : `${addDays(slotDate(week, i), 1)} 05:00`;
-        const slotOpen = (week, i) => `${slotDate(week, i)} ${SLOT_DEFS[i].type === 'D' ? '08:45' : '15:00'}`;
-        const nowStr   = () => tpeNow().toISOString().slice(0, 16).replace('T', ' ');
-
-        // 試算表上方總表：時間列 → 標題列 → 各帳號 → 歐大總績效(參考)（範圍從 C 欄起算）
-        const parseLive = (rows) => {
-            const m = (rows[0] && rows[0][0] || '').match(/(\d{4})\/(\d{1,2})\/(\d{1,2}) (\d{1,2}):(\d{2})/);
-            if (!m) return null;
-            const accounts = []; let total = null;
-            for (const c of rows.slice(2)) {
-                const name = (c[0] || '').trim();
-                if (!name) break;
-                if (name.startsWith('歐大總績效')) {
-                    total = { pnl: toNum(c[5]), personal: toNum(c[3]), base: accounts.reduce((s, a) => s + (a.base || 0), 0) };
-                    break;
-                }
-                accounts.push({ name: name.replace(/\((主|副)\)$/, ''), pnl: toNum(c[5]), base: toNum(c[11]) });
-            }
-            if (!total || total.pnl === null) return null;
-            const { week, slot } = slotAt(new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5])));
-            return { week, slot, total, accounts, live: true };
-        };
-
-        // 百點震幅（同 demo-performance）
-        const swing100 = (prices, threshold = 100) => {
-            const v = prices.filter(p => p !== null);
-            if (v.length < 2) return 0;
-            let total = 0, pivot = v[0], hi = v[0], lo = v[0], trend = 0;
-            for (const p of v.slice(1)) {
-                if (trend === 0) { if (p >= pivot + threshold) { trend = 1; hi = p; } else if (p <= pivot - threshold) { trend = -1; lo = p; } }
-                else if (trend === 1) { if (p > hi) hi = p; else if (p <= hi - threshold) { total += hi - pivot; trend = -1; pivot = hi; lo = p; } }
-                else { if (p < lo) lo = p; else if (p >= lo + threshold) { total += pivot - lo; trend = 1; pivot = lo; hi = p; } }
-            }
-            if (trend === 1 && hi > pivot + threshold) total += hi - pivot;
-            else if (trend === -1 && lo < pivot - threshold) total += pivot - lo;
-            return Math.round(total);
-        };
-        const lastChg = (vals, ref) => {
-            const v = vals.filter(x => x);
-            if (!v.length) return null;
-            const base = ref || v[0], chg = v[v.length - 1] - base;
-            return { last: v[v.length - 1], chg, pct: base ? chg / base * 100 : 0, many: !!ref || v.length > 1 };
-        };
-        const inSession = (label, type) => {
-            const m = (label || '').match(/(\d{1,2}):(\d{2})/);
-            if (!m) return false;
-            const t = +m[1] * 60 + +m[2];
-            return type === 'D' ? t >= 525 && t <= 825 : t >= 900 || t <= 300;
-        };
-        // 示範帳戶試算表 → 本週每盤的百點震幅 / BA / BB
-        const parseDemoMarket = (rows, week) => {
-            const data = rows.slice(1).filter(c => c.length >= 54);
-            const start = (data.find(c => c[8] && c[1]) || [])[1] || '';
-            if (!start.replace(/\//g, '-').startsWith(week)) return {};
-            const out = {};
-            DEMO_ROWS.forEach(([a, b], i) => {
-                const seg = data.slice(a - 2, b - 1).filter(c => inSession(c[0], SLOT_DEFS[i].type));
-                if (!seg.some(c => toNum(c[22]))) return;
-                out[i] = { swing: swing100(seg.map(c => toNum(c[22]))), ba: lastChg(seg.map(c => toNum(c[52]))), bb: lastChg(seg.map(c => toNum(c[53]))) };
-            });
-            return out;
-        };
-
-        // 一週 10 盤：每盤的勝敗、獲利、累積
-        const buildWeek = (week, sessions, live, liveMarket, liveVix) => {
-            const recorded = {};
-            sessions.filter(s => s.week === week).forEach(s => { recorded[s.slot] = s; });
-            const prevWeekLast = sessions.filter(s => s.week < week).slice(-1)[0] || null;
-            const now = nowStr();
-            let prev = null;
-            return SLOT_DEFS.map((def, i) => {
-                const date = slotDate(week, i);
-                const state = recorded[i] || (live && live.week === week && live.slot === i ? live : null);
-                const market = { ...(liveMarket[i] || {}), ...((recorded[i] && recorded[i].market) || {}) };
-                if (def.type === 'D' && !market.vix && liveVix && liveVix.date === date) market.vix = liveVix.vix;
-                if (!state) {
-                    const status = now < slotOpen(week, i) ? '尚未開盤' : now < slotEnd(week, i) ? '等待資料' : '無紀錄';
-                    return { i, def, date, status, market };
-                }
-                const row = { i, def, date, state, market, live: !!state.live };
-                // 基準：上一盤收盤；週三夜盤是一週第一盤（起始資產重設、累積獲利歸 0）
-                let basePnl = null, basePersonal = null, baseAcc = {};
-                if (i === 0) {
-                    if (prevWeekLast && state.total.base === prevWeekLast.total.base) { row.pending = true; prev = state; return row; }
-                    basePnl = 0; basePersonal = 0;
-                } else if (prev) {
-                    basePnl = prev.total.pnl; basePersonal = prev.total.personal;
-                    prev.accounts.forEach(a => { baseAcc[a.name] = a.pnl; });
-                } else if (state.open) {           // 前面幾盤沒存到（例：剛開始記錄）→ 以本盤開盤第一筆為基準
-                    basePnl = state.open.total; baseAcc = state.open.accounts; row.approx = true;
-                }
-                if (basePnl !== null) {
-                    row.pnl = state.total.pnl - basePnl;
-                    row.personal = basePersonal !== null && state.total.personal !== null ? state.total.personal - basePersonal : null;
-                    row.rate = state.total.base ? row.pnl / state.total.base * 100 : null;
-                    row.acc = {};
-                    state.accounts.forEach(a => { if (a.pnl !== null) row.acc[a.name] = a.pnl - (baseAcc[a.name] || 0); });
-                }
-                row.cum = state.total.base ? state.total.pnl / state.total.base * 100 : null;
-                prev = state;
-                return row;
-            });
-        };
-
-        const fmtInt = v => Math.round(v).toLocaleString();
-        const sgnInt = v => `${v > 0 ? '+' : ''}${fmtInt(v)}`;
-        const sgnPct = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
-        const toneOf = v => v > 0 ? 'text-red-600' : v < 0 ? 'text-emerald-600' : 'text-slate-500';
-        const resultOf = v => v === undefined || v === null ? null : v > 0 ? 'win' : v < 0 ? 'lose' : 'flat';
-        const RESULT = {
-            win:  { text: '勝', badge: 'bg-red-600 text-white',     row: 'bg-red-50/70',     cell: 'bg-red-50 text-red-600' },
-            lose: { text: '敗', badge: 'bg-emerald-600 text-white', row: 'bg-emerald-50/70', cell: 'bg-emerald-50 text-emerald-700' },
-            flat: { text: '平', badge: 'bg-slate-400 text-white',   row: '',                 cell: 'text-slate-500' }
-        };
-
+        // ===== 每盤績效表：一週 10 盤，每一盤的勝敗（資料處理與表格在 common.js）=====
         const SessionPanel = () => {
             const [sessions, setSessions]     = useState([]);
             const [live, setLive]             = useState(null);
@@ -530,7 +363,7 @@
                     fetch(`${LIVE_URL}&t=${t}`).then(r => r.ok ? r.text() : '')
                 ]);
                 if (s.status === 'fulfilled' && s.value) setSessions(s.value.sessions || []);
-                if (l.status === 'fulfilled' && l.value) setLive(parseLive(parseCSV(l.value)));
+                if (l.status === 'fulfilled' && l.value) { const snap = parseSnapshots(parseCSV(l.value))[0]; setLive(snap ? { ...snap, live: true } : null); }
             }, []);
             const loadMarket = useCallback(async () => {
                 const week = slotAt(tpeNow()).week;
@@ -538,12 +371,8 @@
                     fetch(`${DEMO_URL}&t=${Date.now()}`).then(r => r.ok ? r.text() : ''),
                     fetch(VIX_URL).then(r => r.ok ? r.json() : null)
                 ]);
-                if (d.status === 'fulfilled' && d.value) setLiveMarket(parseDemoMarket(parseCSV(d.value), week));
-                if (v.status === 'fulfilled' && v.value && v.value.tradeDay && v.value.ticks) {
-                    const td = v.value.tradeDay;
-                    const vals = v.value.ticks.filter(([t]) => String(t).padStart(6, '0') <= '134500').map(([, x]) => x);
-                    setLiveVix({ date: `${td.slice(0, 4)}-${td.slice(4, 6)}-${td.slice(6, 8)}`, vix: lastChg(vals, v.value.quote && v.value.quote.ref) });
-                }
+                if (d.status === 'fulfilled' && d.value) setLiveMarket((parseDemo(parseCSV(d.value), week) || {}).market || {});
+                if (v.status === 'fulfilled') setLiveVix(parseVix(v.value));
             }, []);
 
             useEffect(() => {
@@ -557,122 +386,43 @@
             const isCurrent = week === currentWeek;
             const rows = buildWeek(week, sessions, isCurrent ? live : null, isCurrent ? liveMarket : {}, isCurrent ? liveVix : null);
             const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week)])].sort().reverse();
-
-            const opened = rows.filter(r => r.state && !r.pending);
-            const win  = opened.filter(r => resultOf(r.pnl) === 'win').length;
-            const lose = opened.filter(r => resultOf(r.pnl) === 'lose').length;
-            const lastRow = opened[opened.length - 1];
-            const cum = lastRow ? lastRow.cum : null;
-            const latestIdx = lastRow ? lastRow.i : -1;
+            const sum = summarize(rows);
             const accounts = [];
-            opened.forEach(r => r.state.accounts.forEach(a => { if (!accounts.includes(a.name)) accounts.push(a.name); }));
-
-            const dash = html`<span className="text-slate-300">—</span>`;
-            const th = "px-2 py-2.5 text-[11px] font-black tracking-wider text-center border-slate-800 whitespace-nowrap";
-            const td = "px-2 py-2 text-xs font-bold font-mono-data whitespace-nowrap";
-            const valCell = (r, color, d = 0) => r ? html`
-                <div className=${"font-black " + color}>${r.last.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}</div>
-                ${r.many && html`<div className=${"text-[10px] " + (r.chg >= 0 ? 'text-red-500' : 'text-emerald-500')}>${r.chg > 0 ? '+' : ''}${r.chg.toFixed(d)} (${sgnPct(r.pct)})</div>`}` : dash;
-            const badge = (res, big) => res ? html`<span className=${"inline-flex items-center justify-center rounded-md font-black " + RESULT[res].badge + (big ? " w-8 h-7 text-sm" : " w-6 h-6 text-xs")}>${RESULT[res].text}</span>` : null;
-            const slotName = (r) => html`<span className=${"inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle " + (r.def.type === 'N' ? 'bg-slate-700' : 'bg-orange-400')}></span>${r.def.label}`;
-
-            const summary = opened.length
-                ? `${mdLabel(rows[0].date)} ~ ${mdLabel(rows[9].date)} · 已開 ${opened.length} 盤 · 勝 ${win} 盤、敗 ${lose} 盤 · 累積 ${cum !== null ? sgnPct(cum) : '—'}`
-                : `${mdLabel(rows[0].date)} ~ ${mdLabel(rows[9].date)} · 本週尚無資料`;
+            sum.opened.forEach(r => r.state.accounts.forEach(a => { if (!accounts.includes(a.name)) accounts.push(a.name); }));
+            const weekTag = isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`;
 
             return html`
                 <section className="px-1 sm:px-4 pb-20 bg-[#f1f5f9]">
                     <div className="max-w-7xl mx-auto space-y-4">
                         <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                             <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                                <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`}</span></h2>
-                                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${summary}</span>
+                                <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${weekTag}</span></h2>
+                                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, sum)}</span>
                                 <label className="ml-auto flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-slate-400">歷史週次
                                     <select value=${viewWeek} onChange=${e => setViewWeek(e.target.value)} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs font-bold text-white cursor-pointer">
                                         ${weeks.map(w => html`<option key=${w} value=${w === currentWeek ? '' : w}>${w === currentWeek ? '本週（即時）' : `${mdLabel(w)} 週`}</option>`)}
                                     </select>
                                 </label>
                             </div>
-                            <div className="flex gap-1 sm:gap-1.5 px-2 sm:px-4 py-3 border-b border-slate-100 overflow-x-auto">
-                                ${rows.map(r => {
-                                    const res = r.pending ? null : resultOf(r.pnl);
-                                    return html`
-                                        <div key=${r.i} className="flex-1 min-w-[28px] flex flex-col items-center gap-1">
-                                            <span className=${"text-[10px] font-black " + (r.def.type === 'N' ? 'text-slate-600' : 'text-orange-500')}>${r.def.short}</span>
-                                            <div className=${"w-full h-9 rounded-md flex items-center justify-center text-sm font-black " + (res ? RESULT[res].badge : 'bg-slate-100 text-slate-300') + (r.live ? ' ring-2 ring-offset-1 ring-blue-500' : '')}>
-                                                ${res ? RESULT[res].text : (r.state ? '…' : '·')}
-                                            </div>
-                                            <span className=${"text-[9px] font-bold font-mono-data " + (r.pnl !== undefined ? toneOf(r.pnl) : 'text-slate-300')}>${r.rate !== undefined && r.rate !== null ? sgnPct(r.rate) : mdLabel(r.date)}</span>
-                                        </div>`;
-                                })}
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="bg-slate-900 text-slate-300">
-                                            <th className=${th}>日期</th><th className=${th}>盤別</th><th className=${th}>勝負</th>
-                                            <th className=${th}>百點震幅</th><th className=${th}>週三時價 (BA)</th><th className=${th}>週五時價 (BB)</th><th className=${th}>VIX</th>
-                                            <th className=${th}>獲利金額</th><th className=${th}>個人獲利</th><th className=${th}>獲利率</th><th className=${th}>累積獲利率</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${rows.map(r => {
-                                            if (!r.state) return html`
-                                                <tr key=${r.i} className="text-slate-300">
-                                                    <td className=${td + " text-center"}>${mdLabel(r.date)}</td>
-                                                    <td className=${td}>${slotName(r)}</td>
-                                                    <td className=${td + " text-center text-[11px]"}>${r.status}</td>
-                                                    ${[...Array(8)].map((_, k) => html`<td key=${k} className=${td + " text-right"}>—</td>`)}
-                                                </tr>`;
-                                            const res = r.pending ? null : resultOf(r.pnl);
-                                            const m = r.market;
-                                            const tag = r.live ? html`<span className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-bold text-blue-600"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>進行中</span>`
-                                                      : r.i === latestIdx ? html`<span className="ml-1.5 text-[10px] font-bold text-blue-500">最新</span>` : null;
-                                            return html`
-                                                <tr key=${r.i} className=${res ? RESULT[res].row : ''}>
-                                                    <td className=${td + " text-center text-slate-500"}>${mdLabel(r.date)}</td>
-                                                    <td className=${td + " text-slate-800 font-black"}>${slotName(r)}${tag}</td>
-                                                    <td className=${td + " text-center"}>${r.pending ? html`<span className="text-[11px] text-slate-400">結算中</span>` : badge(res, true) || dash}</td>
-                                                    <td className=${td + " text-right text-slate-800"}>${m.swing !== undefined ? fmtInt(m.swing) : dash}</td>
-                                                    <td className=${td + " text-right leading-tight"}>${valCell(m.ba, 'text-red-600')}</td>
-                                                    <td className=${td + " text-right leading-tight"}>${valCell(m.bb, 'text-green-600')}</td>
-                                                    <td className=${td + " text-right leading-tight"}>${r.def.type === 'D' ? valCell(m.vix, 'text-amber-600', 2) : dash}</td>
-                                                    <td className=${td + " text-right text-sm font-black " + toneOf(r.pnl)}>${r.pnl !== undefined ? sgnInt(r.pnl) : dash}${r.approx ? html`<span className="text-[9px] text-slate-400 ml-0.5" title="前一盤未記錄，以本盤第一筆快照為基準">≈</span>` : null}</td>
-                                                    <td className=${td + " text-right " + toneOf(r.personal)}>${r.personal !== undefined && r.personal !== null ? sgnInt(r.personal) : dash}</td>
-                                                    <td className=${td + " text-right text-sm font-black " + toneOf(r.rate)}>${r.rate !== undefined && r.rate !== null ? sgnPct(r.rate) : dash}</td>
-                                                    <td className=${td + " text-right " + toneOf(r.cum)}>${r.cum !== undefined && r.cum !== null && !r.pending ? sgnPct(r.cum) : dash}</td>
-                                                </tr>`;
-                                        })}
-                                    </tbody>
-                                    ${lastRow && html`
-                                        <tfoot>
-                                            <tr className="bg-slate-50 font-black">
-                                                <td className=${td + " text-slate-800"} colSpan="2">本週合計</td>
-                                                <td className=${td + " text-center text-slate-600"} colSpan="5">已開 ${opened.length} 盤 · <span className="text-red-600">勝 ${win}</span> · <span className="text-emerald-600">敗 ${lose}</span></td>
-                                                <td className=${td + " text-right text-sm " + toneOf(lastRow.state.total.pnl)}>${sgnInt(lastRow.state.total.pnl)}</td>
-                                                <td className=${td + " text-right " + toneOf(lastRow.state.total.personal)}>${lastRow.state.total.personal !== null ? sgnInt(lastRow.state.total.personal) : '—'}</td>
-                                                <td className=${td}></td>
-                                                <td className=${td + " text-right text-sm " + toneOf(cum)}>${cum !== null ? sgnPct(cum) : '—'}</td>
-                                            </tr>
-                                        </tfoot>`}
-                                </table>
-                            </div>
+                            <${WinStrip} rows=${rows} />
+                            <${SessionTable} rows=${rows} showPersonal=${true} />
                             <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">勝敗以全部帳號合計（眾人獲利）判定；獲利率 = 該盤獲利 ÷ 各帳號起始資產合計。紅 = 賺、綠 = 賠。<span className="sm:hidden">表格可左右滑動。</span></p>
                         </div>
 
                         ${accounts.length > 0 && html`
                             <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
-                                <div className="bg-slate-900 px-3 sm:px-4 py-2.5">
-                                    <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">各帳號每盤損益<span className="text-white">${isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`}</span></h2>
+                                <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">各帳號每盤損益<span className="text-white">${weekTag}</span></h2>
+                                    <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">點帳號名稱看該帳號的獨立績效頁</span>
                                 </div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left">
                                         <thead>
                                             <tr className="bg-slate-900 text-slate-300">
-                                                <th className=${th + " sticky left-0 bg-slate-900 z-10"}>帳號</th>
-                                                ${rows.map(r => html`<th key=${r.i} className=${th}><div>${r.def.label}</div><div className="text-[9px] font-bold text-slate-500">${mdLabel(r.date)}</div></th>`)}
-                                                <th className=${th + " text-yellow-400"}>本週累積</th>
-                                                <th className=${th}>勝敗</th>
+                                                <th className=${TH + " sticky left-0 bg-slate-900 z-10"}>帳號</th>
+                                                ${rows.map(r => html`<th key=${r.i} className=${TH}><div>${r.def.label}</div><div className="text-[9px] font-bold text-slate-500">${mdLabel(r.date)}</div></th>`)}
+                                                <th className=${TH + " text-yellow-400"}>本週累積</th>
+                                                <th className=${TH}>勝敗</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -680,17 +430,20 @@
                                                 const isTotal = name === null;
                                                 const vals = rows.map(r => r.pending || r.pnl === undefined ? undefined : isTotal ? r.pnl : r.acc[name]);
                                                 const w = vals.filter(v => resultOf(v) === 'win').length, l = vals.filter(v => resultOf(v) === 'lose').length;
-                                                const lastAcc = lastRow && lastRow.state.accounts.find(a => a.name === name);
-                                                const cumVal = !lastRow ? null : isTotal ? lastRow.state.total.pnl : lastAcc ? lastAcc.pnl : null;
+                                                const lastAcc = sum.lastRow && sum.lastRow.state.accounts.find(a => a.name === name);
+                                                const cumVal = !sum.lastRow ? null : isTotal ? sum.lastRow.state.total.pnl : lastAcc ? lastAcc.pnl : null;
+                                                const acct = !isTotal && accountOf(name);
                                                 return html`
                                                     <tr key=${name || '__total'} className=${isTotal ? 'bg-slate-50 font-black' : ''}>
-                                                        <td className=${td + " sticky left-0 z-10 text-center " + (isTotal ? 'bg-slate-50 text-slate-900' : 'bg-white text-slate-700')}>${isTotal ? '合計（眾人）' : name}</td>
+                                                        <td className=${TD + " sticky left-0 z-10 text-center " + (isTotal ? 'bg-slate-50 text-slate-900' : 'bg-white text-slate-700')}>
+                                                            ${isTotal ? '合計（眾人）' : acct ? html`<a href=${accountUrl(acct)} className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${name}</a>` : name}
+                                                        </td>
                                                         ${vals.map((v, k) => {
                                                             const res = resultOf(v);
-                                                            return html`<td key=${k} className=${td + " text-right " + (res ? RESULT[res].cell : 'text-slate-300')}>${v !== undefined ? sgnInt(v) : ''}</td>`;
+                                                            return html`<td key=${k} className=${TD + " text-right " + (res ? RESULT[res].cell : 'text-slate-300')}>${v !== undefined ? sgnInt(v) : ''}</td>`;
                                                         })}
-                                                        <td className=${td + " text-right font-black " + toneOf(cumVal)}>${cumVal !== null ? sgnInt(cumVal) : '—'}</td>
-                                                        <td className=${td + " text-center"}><span className="text-red-600">${w}勝</span> <span className="text-emerald-600">${l}敗</span></td>
+                                                        <td className=${TD + " text-right font-black " + toneOf(cumVal)}>${cumVal !== null ? sgnInt(cumVal) : '—'}</td>
+                                                        <td className=${TD + " text-center"}><span className="text-red-600">${w}勝</span> <span className="text-emerald-600">${l}敗</span></td>
                                                     </tr>`;
                                             })}
                                         </tbody>
