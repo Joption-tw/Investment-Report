@@ -75,16 +75,45 @@
         };
         const saveShown = v => { try { localStorage.setItem(SHOWN_KEY, JSON.stringify(v)); } catch (e) {} };
 
-        const PerfChart = ({ acc, demo, range, shown, wholeWeek }) => {
-            const ref = useRef(null), chart = useRef(null);
+        // 橡皮擦開著時：在圖上按住拖曳，游標 16px 內的點都塗掉（onErase），放開時送出（onEraseEnd）
+        const ERASE_KEY_STORE = 'ir-erase-key';
+        const getEraseKey = () => { try { return localStorage.getItem(ERASE_KEY_STORE) || ''; } catch (e) { return ''; } };
+        const setEraseKeyStore = v => { try { v ? localStorage.setItem(ERASE_KEY_STORE, v) : localStorage.removeItem(ERASE_KEY_STORE); } catch (e) {} };
+
+        const PerfChart = ({ acc, demo, range, shown, wholeWeek, hidden, eraser, onErase, onEraseEnd }) => {
+            const ref = useRef(null), chart = useRef(null), drawn = useRef([]), lastRange = useRef(null);
+            const live = useRef({});
+            live.current = { eraser, onErase, onEraseEnd };
             useEffect(() => {
-                chart.current = echarts.init(ref.current);
-                const onResize = () => chart.current && chart.current.resize();
+                const c = chart.current = echarts.init(ref.current);
+                const onResize = () => c.resize();
                 window.addEventListener('resize', onResize);
-                return () => { window.removeEventListener('resize', onResize); chart.current.dispose(); };
+                let painting = false;
+                const eraseAt = (x, y) => {
+                    const R = 16, t0 = c.convertFromPixel({ xAxisIndex: 0 }, x - R), t1 = c.convertFromPixel({ xAxisIndex: 0 }, x + R);
+                    const found = [];
+                    drawn.current.forEach(d => d.points.forEach(([t, v]) => {
+                        if (t < t0 || t > t1 || v === null || v === undefined) return;
+                        const [px, py] = c.convertToPixel({ seriesIndex: d.seriesIndex }, [t, v]);
+                        if (Math.hypot(px - x, py - y) <= R) found.push({ def: d.def, t });
+                    }));
+                    if (found.length) live.current.onErase(found);
+                };
+                const zr = c.getZr();
+                zr.on('mousedown', e => { if (!live.current.eraser) return; painting = true; eraseAt(e.offsetX, e.offsetY); });
+                zr.on('mousemove', e => { if (painting) eraseAt(e.offsetX, e.offsetY); });
+                const end = () => { if (painting) { painting = false; live.current.onEraseEnd(); } };
+                zr.on('mouseup', end);
+                zr.on('globalout', end);
+                return () => { window.removeEventListener('resize', onResize); c.dispose(); };
             }, []);
             useEffect(() => {
                 const [min, max] = range;
+                // 同一個時間範圍重畫（塗掉、開關線）時保留目前的縮放
+                let zoom = [0, 100];
+                const rk = `${min}-${max}`;
+                if (lastRange.current === rk) { const dz = (chart.current.getOption().dataZoom || [])[1]; if (dz) zoom = [dz.start, dz.end]; }
+                lastRange.current = rk;
                 const src = { acc: acc.filter(p => p.t >= min && p.t <= max), demo: demo.filter(p => p.t >= min && p.t <= max) };
                 const on = SERIES_DEFS.filter(s => shown.includes(s.key));
                 const used = AXIS_KEYS.filter(k => on.some(s => s.axis === k));
@@ -98,7 +127,7 @@
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
                     grid: { left: count.left * 55 + 15, right: count.right * 55 + 15, top: 30, bottom: 70 },
-                    tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, confine: true,
+                    tooltip: { show: !eraser, trigger: 'axis', axisPointer: { type: 'line' }, confine: true,
                         formatter: ps => ps.length ? `<b>${mdhm(ps[0].value[0])}</b><br>` + ps.map(p => `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], byName[p.seriesName])}</b>`).join('<br>') : '' },
                     xAxis: { type: 'time', min, max, splitLine: { show: false },
                         axisLabel: { hideOverlap: true, color: '#64748b', fontWeight: 'bold', formatter: v => wholeWeek ? mdhm(v).replace(' ', '\n') : hhmm(v) } },
@@ -111,12 +140,12 @@
                     }),
                     dataZoom: [
                         // 滾輪留給頁面捲動：電腦按住 Ctrl + 滾輪縮放、拖曳平移；手機只用下方拉桿
-                        { type: 'inside', xAxisIndex: 0, start: 0, end: 100, filterMode: 'none', disabled: window.innerWidth < 768,
+                        { type: 'inside', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', disabled: eraser || window.innerWidth < 768,
                           zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: true },
-                        { type: 'slider', xAxisIndex: 0, start: 0, end: 100, filterMode: 'none', bottom: 8, height: 24, showDetail: false, brushSelect: false }
+                        { type: 'slider', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', bottom: 8, height: 24, showDetail: false, brushSelect: false }
                     ],
                     series: SERIES_DEFS.map(s => {
-                        const data = shown.includes(s.key) ? src[s.src].map(p => [p.t, p[s.key]]) : [];
+                        const data = shown.includes(s.key) ? src[s.src].filter(p => !hidden(s, p.t)).map(p => [p.t, p[s.key]]) : [];
                         return {
                             name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, connectNulls: true,
                             showSymbol: !!s.dots && data.length <= 150, symbolSize: 4, step: s.step ? 'end' : false, z: s.dots ? 5 : 2,
@@ -126,8 +155,9 @@
                         };
                     })
                 }, true);
-            }, [acc, demo, range, shown, wholeWeek]);
-            return html`<div id="performance-chart" ref=${ref}></div>`;
+                drawn.current = SERIES_DEFS.map((s, i) => ({ def: s, seriesIndex: i, points: shown.includes(s.key) ? src[s.src].filter(p => !hidden(s, p.t)).map(p => [p.t, p[s.key]]) : [] }));
+            }, [acc, demo, range, shown, wholeWeek, hidden, eraser]);
+            return html`<div id="performance-chart" ref=${ref} style=${eraser ? { cursor: 'crosshair', touchAction: 'none' } : undefined}></div>`;
         };
 
         // 走勢圖上方的開關：每一條線一顆，點了就顯示 / 隱藏
@@ -175,6 +205,65 @@
             const [loading, setLoading]   = useState(true);
             const [copied, setCopied]     = useState(false);
 
+            // 橡皮擦：塗掉的點 = 試算表「塗掉紀錄」＋這次在頁面上塗 / 還原的；只有輸入過密碼的瀏覽器看得到橡皮擦（第一次用 &edit=1 打開）
+            const [erased, setErased]       = useState(() => new Set());
+            const [overrides, setOverrides] = useState(() => new Map());
+            const [eraser, setEraser]       = useState(false);
+            const [undoStack, setUndoStack] = useState([]);
+            const [eraseMsg, setEraseMsg]   = useState('');
+            const canErase = !!getEraseKey() || params.get('edit') === '1';
+            const batch = useRef(new Map());
+            const itemOf = (def, t) => ({ account: def.src === 'demo' ? '*' : name, line: def.key, t: stampOf(t) });
+            const keyOf = it => eraseKey(it.account, it.line, it.t);
+            const hidden = useCallback((def, t) => {
+                const k = keyOf(itemOf(def, t));
+                return overrides.has(k) ? overrides.get(k) : erased.has(k);
+            }, [erased, overrides, name]);
+            const mark = (items, value) => setOverrides(prev => { const m = new Map(prev); items.forEach(it => m.set(keyOf(it), value)); return m; });
+            const postErase = async (items, action) => {
+                try {
+                    const r = await fetch(ERASE_API, { method: 'POST', body: JSON.stringify({ key: getEraseKey(), items: items.map(it => ({ ...it, action })) }) });
+                    const j = await r.json();
+                    if (!j.ok) {
+                        if (j.error === '密碼錯誤') { setEraseKeyStore(''); setEraser(false); }
+                        setEraseMsg(`沒有存到：${j.error}`); return;
+                    }
+                    setEraseMsg(`${action === 'erase' ? '已塗掉' : '已還原'} ${items.length} 點，所有人都會看到`);
+                } catch (e) { setEraseMsg('沒有存到：連線失敗，請再試一次'); }
+            };
+            const onErase = found => {
+                const add = [];
+                found.forEach(({ def, t }) => { const it = itemOf(def, t), k = keyOf(it); if (!batch.current.has(k)) { batch.current.set(k, it); add.push(it); } });
+                if (add.length) mark(add, true);
+            };
+            const onEraseEnd = () => {
+                const items = [...batch.current.values()];
+                batch.current = new Map();
+                if (!items.length) return;
+                setUndoStack(st => [...st, items]);
+                postErase(items, 'erase');
+            };
+            const undo = () => {
+                const items = undoStack[undoStack.length - 1];
+                if (!items) return;
+                setUndoStack(st => st.slice(0, -1));
+                mark(items, false);
+                postErase(items, 'restore');
+            };
+            const toggleEraser = async () => {
+                if (eraser) { setEraser(false); return; }
+                if (!ERASE_API) { setEraseMsg('橡皮擦還沒設定好'); return; }
+                if (!getEraseKey()) {
+                    const key = (window.prompt('請輸入橡皮擦密碼') || '').trim();
+                    if (!key) return;
+                    const r = await fetch(ERASE_API, { method: 'POST', body: JSON.stringify({ key, check: true }) }).then(x => x.json()).catch(() => null);
+                    if (!r || !r.ok) { setEraseMsg(r ? '密碼錯誤' : '連線失敗，請再試一次'); return; }
+                    setEraseKeyStore(key);
+                }
+                setEraser(true);
+                setEraseMsg('');
+            };
+
             const currentWeek = snaps[0] ? snaps[0].week : slotAt(tpeNow()).week;
             const week = viewWeek || currentWeek;
             const isCurrent = week === currentWeek;
@@ -185,8 +274,10 @@
             const loadLive = useCallback(async () => {
                 const t = Date.now();
                 const since = new Date(tpeNow().getTime() - 3 * 3600e3).toISOString().slice(0, 19).replace('T', ' ').replace(/-/g, '/');
-                const [s, sn, lg, v] = await Promise.all([getJSON(`${SESSIONS_URL}?t=${t}`), getText(`${SNAPS_URL}&t=${t}`), getText(`${LOG_URL(since)}&t=${t}`), getJSON(VIX_URL)]);
+                const [s, sn, lg, v, er] = await Promise.all([getJSON(`${SESSIONS_URL}?t=${t}`), getText(`${SNAPS_URL}&t=${t}`), getText(`${LOG_URL(since)}&t=${t}`),
+                                                              getJSON(VIX_URL), getText(`${ERASE_LOG_URL}&t=${t}`)]);
                 if (s) setSessions(s.sessions || []);
+                if (er) setErased(parseErasures(parseCSV(er)));
                 if (sn || lg) setSnaps([...(lg ? parseLog(parseCSV(lg)) : []), ...(sn ? parseSnapshots(parseCSV(sn)) : [])].sort((a, b) => b.t - a.t));
                 setVix(parseVix(v));
                 setUpdated(new Date());
@@ -216,7 +307,7 @@
                 return () => clearInterval(timer);
             }, [name, week, isCurrent, loadWeek]);
 
-            // 每個帳號頁單獨分享：不列出其他帳號、不連回總表
+            // 帳號頁單獨分享：不列出其他帳號
             if (!name) return html`
                 <div className="max-w-xl mx-auto p-6">
                     <h1 className="text-2xl font-black text-slate-800">找不到這個帳號</h1>
@@ -245,6 +336,7 @@
                 return zero > 0 ? pts.filter((p, k) => k >= zero || p.slot !== 0) : pts;
             })();
             const demoWeek = demo[week] || null;
+            const demoSeries = demoWeek && demoWeek.series ? despike(demoWeek.series, ['fut', 'ba', 'bb']) : [];
 
             const views = sessions.map(s => accountView(s, name)).filter(Boolean);
             const latestSnap = isCurrent && snaps[0] ? accountView(snaps[0], name) : null;
@@ -271,7 +363,9 @@
             return html`
                 <div className="max-w-[1500px] mx-auto space-y-2 sm:space-y-3 p-1.5 sm:p-4">
                     <header className="glass-card px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:grid sm:grid-cols-[1fr_auto_1fr] items-center gap-3">
-                        <div className="hidden sm:block"></div>
+                        ${ACCT.home !== false
+                            ? html`<a href="./" className="self-start sm:self-center sm:justify-self-start inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-900 text-yellow-400 font-black text-xs hover:bg-slate-800">← 總表</a>`
+                            : html`<div className="hidden sm:block"></div>`}
                         <div className="text-center">
                             <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">${name}<span className="text-slate-400 font-bold text-lg sm:text-2xl ml-2">即時績效</span></h1>
                             <div className="flex items-center justify-center gap-2 flex-wrap mt-1">
@@ -325,8 +419,27 @@
 
                     <div className="glass-card p-2 md:p-4">
                         <${LinePicker} shown=${shown} setShown=${setShown} />
+                        ${canErase && (() => {
+                            // 這一段時間裡塗掉的點（本帳號＋市場資料）
+                            const all = new Set(erased);
+                            overrides.forEach((v, k) => v ? all.add(k) : all.delete(k));
+                            const inRange = [...all].map(k => { const [account, line, t] = k.split('|'); return { account, line, t }; })
+                                .filter(it => (it.account === name || it.account === '*') && wallMs(it.t) >= range[0] && wallMs(it.t) <= range[1]);
+                            const restoreAll = () => { mark(inRange, false); postErase(inRange, 'restore'); };
+                            return html`
+                                <div className="flex flex-wrap items-center justify-center gap-2 mb-3 px-1">
+                                    <button onClick=${toggleEraser} className=${"inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 text-xs font-black active:scale-95 " + (eraser ? 'bg-pink-600 border-pink-600 text-white' : 'bg-white border-pink-300 text-pink-600 hover:border-pink-500')}>
+                                        🧽 ${eraser ? '橡皮擦開啟中（按一下關閉）' : '橡皮擦'}
+                                    </button>
+                                    ${eraser && html`<span className="text-[11px] font-bold text-pink-600">在圖上按住拖曳，把不合理的點塗掉</span>`}
+                                    ${undoStack.length > 0 && html`<button onClick=${undo} className="px-3 py-1.5 rounded-full text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200">↶ 復原上一次</button>`}
+                                    ${inRange.length > 0 && html`<button onClick=${restoreAll} className="px-3 py-1.5 rounded-full text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200">還原這段塗掉的 ${inRange.length} 點</button>`}
+                                    ${eraseMsg && html`<span className="text-[11px] font-bold text-slate-500">${eraseMsg}</span>`}
+                                </div>`;
+                        })()}
                         ${loading ? html`<div className="h-[440px] flex items-center justify-center text-slate-400 font-bold text-sm">資料同步中…</div>`
-                                  : html`<${PerfChart} acc=${acc} demo=${(demoWeek && demoWeek.series) || []} range=${range} shown=${shown} wholeWeek=${wholeWeek} />`}
+                                  : html`<${PerfChart} acc=${acc} demo=${demoSeries} range=${range} shown=${shown} wholeWeek=${wholeWeek}
+                                                     hidden=${hidden} eraser=${eraser} onErase=${onErase} onEraseEnd=${onEraseEnd} />`}
                         ${!loading && !acc.some(p => p.t >= range[0] && p.t <= range[1]) && html`<p className="text-center text-xs font-bold text-slate-400 -mt-2 pb-2">這一盤還沒有這個帳號的走勢資料</p>`}
                     </div>
 

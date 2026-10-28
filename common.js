@@ -15,16 +15,16 @@ const DEMO_URL     = 'https://docs.google.com/spreadsheets/d/1AsY4_MJipaMp_cNLpy
 const DEMO_HISTORY = w => `https://joption-tw.github.io/sample/history/${w}.csv`;
 const VIX_URL      = 'https://demo-performance.vercel.app/api/vix';
 
-// ===== 帳號網址：account.html?id=<代號> =====
+// ===== 帳號網址：account.html?id=<代號>；home: false 的帳號頁不顯示「← 總表」=====
 const ACCOUNTS = [
     { id: 'demo',       name: '示範帳號' },
     { id: 'kgi',        name: '歐大_凱基' },
     { id: 'main',       name: '大帳號' },
     { id: 'gary',       name: 'gary-lan' },
-    { id: 'mtk',        name: '聯發哥', alias: ['連發哥'] },
+    { id: 'mtk',        name: '聯發哥', alias: ['連發哥'], home: false },
     { id: 'masterlink', name: '獨孤求敗_元富' },
     { id: 'richdad',    name: '富爸爸' },
-    { id: 'rick',       name: 'Rick' },
+    { id: 'rick',       name: 'Rick', home: false },
     { id: 'mom',        name: '媽媽帳號' }
 ];
 const cleanName  = s => String(s || '').trim().replace(/\((主|副)\)$/, '');
@@ -129,6 +129,37 @@ const parseLog = (rows) => {
         if (total && total.pnl !== null && accounts.length) snaps.push({ t, fut: toNum(group[0][10]), total, accounts, ...slotAt(new Date(t)) });
     });
     return snaps.sort((a, b) => b.t - a.t);
+};
+
+// ===== 橡皮擦：塗掉的點記在試算表「塗掉紀錄」分頁（apps-script/eraser.gs 網頁應用程式寫入，要密碼）=====
+// 期指 / 週三、週五時價是市場資料，帳號記成「*」，所有帳號頁一起不畫
+const ERASE_API     = 'https://script.google.com/macros/s/AKfycbzPpkcKFet7joAB7OMFFgV18PisYB9hPgciV2AxUBroTlnafj0_N5Pamglcj84PA6Tbkg/exec';
+const ERASE_LOG_URL = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('塗掉紀錄')}`;
+const stampOf  = ms => new Date(ms).toISOString().slice(0, 19).replace('T', ' ').replace(/-/g, '/');
+const eraseKey = (account, line, t) => `${account}|${line}|${t}`;
+const parseErasures = (rows) => {
+    const out = new Set();
+    if (!rows.length || rows[0][0] !== '記錄時間' || rows[0][1] !== '帳號') return out;
+    rows.slice(1).forEach(r => {                 // 照記錄順序：最後一筆是「塗掉」就不畫，「還原」就照畫
+        const k = eraseKey(r[1], r[2], r[3]);
+        if (r[4] === '還原') out.delete(k); else if (r[4] === '塗掉') out.add(k);
+    });
+    return out;
+};
+
+// 自動過濾跳點（同 demo-performance）：某一點跟前後兩點的平均差太多，就用平均取代；每一盤分開算，不跨盤
+const despike = (pts, keys) => {
+    const out = pts.map(p => ({ ...p }));
+    keys.forEach(key => {
+        for (let i = 1; i < out.length - 1; i++) {
+            const a = out[i - 1], b = out[i], c = out[i + 1];
+            if (a[key] == null || b[key] == null || c[key] == null) continue;
+            if (b.t - a.t > 10 * 60e3 || c.t - b.t > 10 * 60e3) continue;
+            const avg = (a[key] + c[key]) / 2, th = Math.abs(avg) < 50 ? 0.3 : Math.abs(avg) * 0.005;
+            if (Math.abs(b[key] - avg) > th) b[key] = avg;
+        }
+    });
+    return out;
 };
 
 // 百點震幅（同 demo-performance）
