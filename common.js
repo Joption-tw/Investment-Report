@@ -162,6 +162,14 @@ const despike = (pts, keys) => {
     return out;
 };
 
+// 畫線前平滑（同 sample 網站）：每一點跟前後兩點取平均；[時間, 值] 陣列，不跨盤
+const smooth3 = pairs => pairs.map(([t, v], i) => {
+    if (v == null) return [t, v];
+    let sum = v, n = 1;
+    [pairs[i - 1], pairs[i + 1]].forEach(q => { if (q && q[1] != null && Math.abs(q[0] - t) <= 10 * 60e3) { sum += q[1]; n++; } });
+    return [t, +(sum / n).toFixed(4)];
+});
+
 // 百點震幅（同 demo-performance）
 const swing100 = (prices, threshold = 100) => {
     const v = prices.filter(p => p !== null);

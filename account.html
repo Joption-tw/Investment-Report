@@ -57,16 +57,24 @@
             margin: { name: '剩餘%',  side: 'right', color: '#6366f1', min: 0, max: 100, fmt: v => `${v}%` }
         };
         const AXIS_KEYS = Object.keys(AXES);
+        // 線的樣式跟 sample 網站一樣：平滑、2.2 粗、淡陰影；獲利率只畫漸層面積；最高 / 最低點標數字（peak）
         const SERIES_DEFS = [
-            { key: 'fut',    label: '期指',           axis: 'fut',    color: '#2563eb', src: 'demo', width: 1.5 },
-            { key: 'pts',    label: '總點數',         axis: 'pts',    color: '#475569', src: 'acc',  step: true, area: 'rgba(71,85,105,0.08)' },
-            { key: 'rate',   label: '獲利率',         axis: 'rate',   color: '#e11d48', src: 'acc',  width: 2.5, area: 'rgba(225,29,72,0.08)', dots: true, unit: '%', d: 2 },
-            { key: 'pnl',    label: '獲利金額',       axis: 'pnl',    color: '#d97706', src: 'acc' },
-            { key: 'ba',     label: '週三時價',       axis: 'price',  color: '#ef4444', src: 'demo', width: 1.5 },
-            { key: 'bb',     label: '週五時價',       axis: 'price',  color: '#10b981', src: 'demo', width: 1.5 },
-            { key: 'ratio',  label: '買權比值',       axis: 'ratio',  color: '#ca8a04', src: 'acc',  d: 2 },
-            { key: 'margin', label: '保證金剩餘比率', axis: 'margin', color: '#6366f1', src: 'acc',  unit: '%' }
+            { key: 'fut',    label: '期指',           axis: 'fut',    color: '#2563eb', src: 'demo', z: 5, peak: { max: '#ef4444', min: '#10b981', bold: true } },
+            { key: 'pts',    label: '總點數',         axis: 'pts',    color: '#334155', src: 'acc',  z: 5, peak: { max: '#64748b' } },
+            { key: 'rate',   label: '獲利率',         axis: 'rate',   color: '#e11d48', src: 'acc',  z: 1, area: true, unit: '%', d: 2, peak: { max: '#22d3ee', min: '#ec4899', bold: true } },
+            { key: 'pnl',    label: '獲利金額',       axis: 'pnl',    color: '#d97706', src: 'acc',  z: 3 },
+            { key: 'ba',     label: '週三時價',       axis: 'price',  color: '#ef4444', src: 'demo', z: 4, peak: { max: '#ef4444' } },
+            { key: 'bb',     label: '週五時價',       axis: 'price',  color: '#10b981', src: 'demo', z: 4, peak: { max: '#10b981' } },
+            { key: 'ratio',  label: '買權比值',       axis: 'ratio',  color: '#ca8a04', src: 'acc',  z: 3, d: 2 },
+            { key: 'margin', label: '保證金剩餘比率', axis: 'margin', color: '#6366f1', src: 'acc',  z: 3, unit: '%' }
         ];
+        const peakPoints = (s, fmt) => {
+            if (!s.peak) return undefined;
+            const label = (color, position, offset) => ({ color, position, offset, formatter: p => fmt(p.value, s) });
+            return { symbol: 'circle', symbolSize: 0, label: { show: true, fontSize: 10, fontWeight: s.peak.bold ? 'bold' : 'normal' },
+                     data: [s.peak.max && { type: 'max', label: label(s.peak.max, 'top', [0, -5]) },
+                            s.peak.min && { type: 'min', label: label(s.peak.min, 'bottom', [0, 5]) }].filter(Boolean) };
+        };
         const DEFAULT_SHOWN = ['pts', 'rate', 'ba', 'bb'];
         const SHOWN_KEY = 'ir-account-chart-lines';
         const loadShown = () => {
@@ -122,6 +130,13 @@
                 const offsetOf = {}, count = { left: 0, right: 0 };
                 usedAxes.forEach(k => { offsetOf[k] = count[AXES[k].side]++ * 55; });
                 const byName = Object.fromEntries(SERIES_DEFS.map(s => [s.label, s]));
+                // 每條線：拿掉塗掉的點 → 過濾跳點（示範帳戶資料在上層已過濾）→ 跟前後兩點平均，跟 sample 一樣
+                const lines = SERIES_DEFS.map((s, i) => {
+                    if (!shown.includes(s.key)) return { def: s, seriesIndex: i, points: [] };
+                    let pts = src[s.src].filter(p => !hidden(s, p.t));
+                    if (s.src === 'acc') pts = despike(pts, [s.key]);
+                    return { def: s, seriesIndex: i, points: smooth3(pts.map(p => [p.t, p[s.key]])) };
+                });
                 const fmt = (v, s) => v === null || v === undefined ? '—' : s && s.d ? `${v.toFixed(s.d)}${s.unit || ''}` : `${Math.round(v).toLocaleString()}${s && s.unit || ''}`;
                 chart.current.setOption({
                     animation: false,
@@ -144,18 +159,18 @@
                           zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: true },
                         { type: 'slider', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', bottom: 8, height: 24, showDetail: false, brushSelect: false }
                     ],
-                    series: SERIES_DEFS.map(s => {
-                        const data = shown.includes(s.key) ? src[s.src].filter(p => !hidden(s, p.t)).map(p => [p.t, p[s.key]]) : [];
+                    series: lines.map(({ def: s, points: data }) => {
                         return {
                             name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, connectNulls: true,
-                            showSymbol: !!s.dots && data.length <= 150, symbolSize: 4, step: s.step ? 'end' : false, z: s.dots ? 5 : 2,
-                            lineStyle: { width: s.width || 2, color: s.color }, itemStyle: { color: s.color }, emphasis: { disabled: true },
-                            areaStyle: s.area ? { color: s.area } : undefined,
+                            smooth: true, showSymbol: false, z: s.z,
+                            lineStyle: { width: s.area ? 0 : 2.2, color: s.color, shadowBlur: 3 }, itemStyle: { color: s.color }, emphasis: { disabled: true },
+                            areaStyle: s.area ? { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(225, 29, 72, 0.7)' }, { offset: 1, color: 'rgba(225, 29, 72, 0.05)' }]) } : undefined,
+                            markPoint: data.length ? peakPoints(s, fmt) : undefined,
                             markLine: s.key === 'rate' && data.length ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined
                         };
                     })
                 }, true);
-                drawn.current = SERIES_DEFS.map((s, i) => ({ def: s, seriesIndex: i, points: shown.includes(s.key) ? src[s.src].filter(p => !hidden(s, p.t)).map(p => [p.t, p[s.key]]) : [] }));
+                drawn.current = lines;
             }, [acc, demo, range, shown, wholeWeek, hidden, eraser]);
             return html`<div id="performance-chart" ref=${ref} style=${eraser ? { cursor: 'crosshair', touchAction: 'none' } : undefined}></div>`;
         };
