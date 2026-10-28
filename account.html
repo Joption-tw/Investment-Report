@@ -26,12 +26,6 @@
                        background: white; color: #64748b; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; user-select: none; transition: all 150ms; }
         .session-btn.active { background: #f97316; color: white; border-color: #ea580c; transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(249, 115, 22, 0.2); }
         .session-btn.night.active { background: #1e293b; border-color: #0f172a; }
-        .mode-toggle { display: flex; background: #f1f5f9; padding: 2px; border-radius: 8px; border: 1px solid #e2e8f0; }
-        .mode-btn { padding: 5px 12px; font-size: 12px; font-weight: 900; border-radius: 6px; cursor: pointer; color: #64748b; white-space: nowrap; transition: all 0.2s; }
-        .mode-btn.active.l-idx { background: #2563eb; color: white; }
-        .mode-btn.active.l-tot { background: #475569; color: white; }
-        .mode-btn.active.r-prf { background: #e11d48; color: white; }
-        .mode-btn.active.r-tmv { background: #9333ea; color: white; }
         @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
         .live-indicator { animation: pulse-soft 2s infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -52,9 +46,36 @@
         const params = new URLSearchParams(location.search);
         const ACCT = ACCOUNTS.find(a => a.id === params.get('id')) || accountOf(params.get('name'));
 
-        const AXIS_COLORS = { idx: '#2563eb', tot: '#475569', prf: '#e11d48', ba: '#ef4444', bb: '#10b981' };
+        // 走勢圖每一條線都可以自己開關；同一個軸的線共用刻度，只有畫出來的線的軸才顯示
+        const AXES = {
+            fut:    { name: '期指',   side: 'left',  color: '#2563eb', scale: true },
+            pts:    { name: '總點',   side: 'left',  color: '#475569', min: 0 },
+            rate:   { name: '獲利%',  side: 'right', color: '#e11d48', scale: true, fmt: v => `${v}%` },
+            pnl:    { name: '獲利',   side: 'right', color: '#d97706', scale: true },
+            price:  { name: '時價',   side: 'right', color: '#9333ea', scale: true },
+            ratio:  { name: '比值',   side: 'right', color: '#ca8a04', min: 0, max: 1 },
+            margin: { name: '剩餘%',  side: 'right', color: '#6366f1', min: 0, max: 100, fmt: v => `${v}%` }
+        };
+        const AXIS_KEYS = Object.keys(AXES);
+        const SERIES_DEFS = [
+            { key: 'fut',    label: '期指',           axis: 'fut',    color: '#2563eb', src: 'demo', width: 1.5 },
+            { key: 'pts',    label: '總點數',         axis: 'pts',    color: '#475569', src: 'acc',  step: true, area: 'rgba(71,85,105,0.08)' },
+            { key: 'rate',   label: '獲利率',         axis: 'rate',   color: '#e11d48', src: 'acc',  width: 2.5, area: 'rgba(225,29,72,0.08)', dots: true, unit: '%', d: 2 },
+            { key: 'pnl',    label: '獲利金額',       axis: 'pnl',    color: '#d97706', src: 'acc' },
+            { key: 'ba',     label: '週三時價',       axis: 'price',  color: '#ef4444', src: 'demo', width: 1.5 },
+            { key: 'bb',     label: '週五時價',       axis: 'price',  color: '#10b981', src: 'demo', width: 1.5 },
+            { key: 'ratio',  label: '買權比值',       axis: 'ratio',  color: '#ca8a04', src: 'acc',  d: 2 },
+            { key: 'margin', label: '保證金剩餘比率', axis: 'margin', color: '#6366f1', src: 'acc',  unit: '%' }
+        ];
+        const DEFAULT_SHOWN = ['pts', 'rate', 'ba', 'bb'];
+        const SHOWN_KEY = 'ir-account-chart-lines';
+        const loadShown = () => {
+            try { const v = JSON.parse(localStorage.getItem(SHOWN_KEY)); if (Array.isArray(v)) return v.filter(k => SERIES_DEFS.some(s => s.key === k)); } catch (e) {}
+            return DEFAULT_SHOWN;
+        };
+        const saveShown = v => { try { localStorage.setItem(SHOWN_KEY, JSON.stringify(v)); } catch (e) {} };
 
-        const PerfChart = ({ acc, demo, range, axis, wholeWeek }) => {
+        const PerfChart = ({ acc, demo, range, shown, wholeWeek }) => {
             const ref = useRef(null), chart = useRef(null);
             useEffect(() => {
                 chart.current = echarts.init(ref.current);
@@ -64,42 +85,72 @@
             }, []);
             useEffect(() => {
                 const [min, max] = range;
-                const a = acc.filter(p => p.t >= min && p.t <= max), d = demo.filter(p => p.t >= min && p.t <= max);
-                const lc = (axis.idx ? 1 : 0) + (axis.tot ? 1 : 0), rc = (axis.prf ? 1 : 0) + (axis.tmv ? 1 : 0);
-                const line = (name, yAxisIndex, data, color, extra = {}) => ({ name, type: 'line', yAxisIndex, data, showSymbol: false, connectNulls: true,
-                    lineStyle: { width: 2, color }, itemStyle: { color }, emphasis: { disabled: true }, ...extra });
-                const fmt = (v, name) => v === null || v === undefined ? '—' : name === '獲利率' ? `${v.toFixed(2)}%` : Math.round(v).toLocaleString();
+                const src = { acc: acc.filter(p => p.t >= min && p.t <= max), demo: demo.filter(p => p.t >= min && p.t <= max) };
+                const on = SERIES_DEFS.filter(s => shown.includes(s.key));
+                const used = AXIS_KEYS.filter(k => on.some(s => s.axis === k));
+                // 手機寬度不夠：每邊只顯示一個軸的刻度（其他線一樣用自己的刻度畫）
+                const usedAxes = window.innerWidth < 768 ? used.filter(k => used.find(x => AXES[x].side === AXES[k].side) === k) : used;
+                const offsetOf = {}, count = { left: 0, right: 0 };
+                usedAxes.forEach(k => { offsetOf[k] = count[AXES[k].side]++ * 55; });
+                const byName = Object.fromEntries(SERIES_DEFS.map(s => [s.label, s]));
+                const fmt = (v, s) => v === null || v === undefined ? '—' : s && s.d ? `${v.toFixed(s.d)}${s.unit || ''}` : `${Math.round(v).toLocaleString()}${s && s.unit || ''}`;
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
-                    grid: { left: lc * 55 + 15, right: rc * 55 + 15, top: 30, bottom: 70 },
+                    grid: { left: count.left * 55 + 15, right: count.right * 55 + 15, top: 30, bottom: 70 },
                     tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, confine: true,
-                        formatter: ps => ps.length ? `<b>${mdhm(ps[0].value[0])}</b><br>` + ps.map(p => `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], p.seriesName)}</b>`).join('<br>') : '' },
+                        formatter: ps => ps.length ? `<b>${mdhm(ps[0].value[0])}</b><br>` + ps.map(p => `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], byName[p.seriesName])}</b>`).join('<br>') : '' },
                     xAxis: { type: 'time', min, max, splitLine: { show: false },
                         axisLabel: { hideOverlap: true, color: '#64748b', fontWeight: 'bold', formatter: v => wholeWeek ? mdhm(v).replace(' ', '\n') : hhmm(v) } },
-                    yAxis: [
-                        { type: 'value', name: '期指', position: 'left', show: axis.idx, scale: true, axisLabel: { color: AXIS_COLORS.idx, fontWeight: 'bold', fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } } },
-                        { type: 'value', name: '總點', position: 'left', offset: axis.idx ? 55 : 0, show: axis.tot, min: 0, axisLabel: { color: AXIS_COLORS.tot, fontWeight: 'bold', fontSize: 10 }, splitLine: { show: false } },
-                        { type: 'value', name: '獲利%', position: 'right', show: axis.prf, scale: true, axisLabel: { color: AXIS_COLORS.prf, fontWeight: 'bold', fontSize: 10, formatter: v => `${v}%` }, splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } } },
-                        { type: 'value', name: '時價', position: 'right', offset: axis.prf ? 55 : 0, show: axis.tmv, scale: true, axisLabel: { color: '#9333ea', fontWeight: 'bold', fontSize: 10 }, splitLine: { show: false } }
-                    ],
+                    yAxis: AXIS_KEYS.map(k => {
+                        const a = AXES[k], first = usedAxes[0] === k;
+                        return { type: 'value', name: a.name, position: a.side, offset: offsetOf[k] || 0, show: usedAxes.includes(k),
+                                 scale: !!a.scale, min: a.min, max: a.max,
+                                 axisLabel: { color: a.color, fontWeight: 'bold', fontSize: 10, formatter: a.fmt },
+                                 splitLine: first ? { lineStyle: { type: 'dashed', color: '#f1f5f9' } } : { show: false } };
+                    }),
                     dataZoom: [
                         // 滾輪留給頁面捲動：電腦按住 Ctrl + 滾輪縮放、拖曳平移；手機只用下方拉桿
                         { type: 'inside', xAxisIndex: 0, start: 0, end: 100, filterMode: 'none', disabled: window.innerWidth < 768,
                           zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: true },
                         { type: 'slider', xAxisIndex: 0, start: 0, end: 100, filterMode: 'none', bottom: 8, height: 24, showDetail: false, brushSelect: false }
                     ],
-                    series: [
-                        line('期指', 0, axis.idx ? d.map(p => [p.t, p.fut]) : [], AXIS_COLORS.idx, { lineStyle: { width: 1.5, color: AXIS_COLORS.idx } }),
-                        line('總點數', 1, axis.tot ? a.map(p => [p.t, p.pts]) : [], AXIS_COLORS.tot, { step: 'end', areaStyle: { color: 'rgba(71,85,105,0.08)' } }),
-                        line('獲利率', 2, axis.prf ? a.map(p => [p.t, p.rate]) : [], AXIS_COLORS.prf, { showSymbol: a.length <= 150, symbolSize: 4, z: 5, lineStyle: { width: 2.5, color: AXIS_COLORS.prf }, areaStyle: { color: 'rgba(225,29,72,0.08)' },
-                            markLine: axis.prf ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined }),
-                        line('週三時價', 3, axis.tmv ? d.map(p => [p.t, p.ba]) : [], AXIS_COLORS.ba, { lineStyle: { width: 1.5, color: AXIS_COLORS.ba } }),
-                        line('週五時價', 3, axis.tmv ? d.map(p => [p.t, p.bb]) : [], AXIS_COLORS.bb, { lineStyle: { width: 1.5, color: AXIS_COLORS.bb } })
-                    ]
+                    series: SERIES_DEFS.map(s => {
+                        const data = shown.includes(s.key) ? src[s.src].map(p => [p.t, p[s.key]]) : [];
+                        return {
+                            name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, connectNulls: true,
+                            showSymbol: !!s.dots && data.length <= 150, symbolSize: 4, step: s.step ? 'end' : false, z: s.dots ? 5 : 2,
+                            lineStyle: { width: s.width || 2, color: s.color }, itemStyle: { color: s.color }, emphasis: { disabled: true },
+                            areaStyle: s.area ? { color: s.area } : undefined,
+                            markLine: s.key === 'rate' && data.length ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined
+                        };
+                    })
                 }, true);
-            }, [acc, demo, range, axis, wholeWeek]);
+            }, [acc, demo, range, shown, wholeWeek]);
             return html`<div id="performance-chart" ref=${ref}></div>`;
+        };
+
+        // 走勢圖上方的開關：每一條線一顆，點了就顯示 / 隱藏
+        const LinePicker = ({ shown, setShown }) => {
+            const toggle = k => setShown(shown.includes(k) ? shown.filter(x => x !== k) : [...shown, k]);
+            return html`
+                <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 mb-3 px-1">
+                    <span className="w-full sm:w-auto text-center text-[10px] font-black text-slate-400 sm:mr-1">點選要看的線：</span>
+                    ${SERIES_DEFS.map(s => {
+                        const on = shown.includes(s.key);
+                        return html`
+                            <button key=${s.key} onClick=${() => toggle(s.key)} aria-pressed=${on}
+                                    className=${"inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full border-2 text-[11px] sm:text-xs font-black transition-all active:scale-95 " + (on ? 'text-white shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400')}
+                                    style=${on ? { background: s.color, borderColor: s.color } : undefined}>
+                                <span className="w-2.5 h-2.5 rounded-full border-2" style=${{ borderColor: on ? 'white' : s.color, background: on ? 'white' : 'transparent' }}></span>
+                                ${s.label}
+                            </button>`;
+                    })}
+                    <span className="flex gap-1.5">
+                        <button onClick=${() => setShown(SERIES_DEFS.map(s => s.key))} className="px-2.5 py-1.5 rounded-full text-[11px] font-black text-slate-500 bg-slate-100 hover:bg-slate-200">全部</button>
+                        <button onClick=${() => setShown(DEFAULT_SHOWN)} className="px-2.5 py-1.5 rounded-full text-[11px] font-black text-slate-500 bg-slate-100 hover:bg-slate-200">預設</button>
+                    </span>
+                </div>`;
         };
 
         const Stat = ({ label, color, children, sub }) => html`
@@ -118,7 +169,8 @@
             const [vix, setVix]           = useState(null);
             const [viewWeek, setViewWeek] = useState('');
             const [sel, setSel]           = useState(null); // 盤 0~9、'week' = 整週、null = 最新一盤
-            const [axis, setAxis]         = useState({ idx: false, tot: true, prf: true, tmv: true });
+            const [shown, setShownState]  = useState(loadShown);
+            const setShown = v => { setShownState(v); saveShown(v); };
             const [updated, setUpdated]   = useState(null);
             const [loading, setLoading]   = useState(true);
             const [copied, setCopied]     = useState(false);
@@ -272,30 +324,9 @@
                     </div>
 
                     <div className="glass-card p-2 md:p-4">
-                        <div className="flex flex-col lg:flex-row justify-between items-center mb-3 gap-3 px-1">
-                            <div className="flex flex-col gap-1 w-full lg:w-auto">
-                                <span className="text-[9px] font-black text-slate-400 ml-1">左軸顯示</span>
-                                <div className="mode-toggle">
-                                    <div className=${"mode-btn flex-1 text-center l-idx" + (axis.idx ? ' active' : '')} onClick=${() => setAxis({ ...axis, idx: !axis.idx })}>期指</div>
-                                    <div className=${"mode-btn flex-1 text-center l-tot" + (axis.tot ? ' active' : '')} onClick=${() => setAxis({ ...axis, tot: !axis.tot })}>總點數</div>
-                                </div>
-                            </div>
-                            <div className="flex flex-wrap justify-center items-center gap-3 sm:gap-4 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 min-h-[40px] text-[11px] font-black text-slate-700">
-                                ${axis.idx && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.idx }}></span>期指</span>`}
-                                ${axis.tot && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.tot }}></span>總點數</span>`}
-                                ${axis.prf && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.prf }}></span>獲利率</span>`}
-                                ${axis.tmv && html`<span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.ba }}></span>週三</span><span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style=${{ background: AXIS_COLORS.bb }}></span>週五</span>`}
-                            </div>
-                            <div className="flex flex-col gap-1 w-full lg:w-auto lg:items-end">
-                                <span className="text-[9px] font-black text-slate-400 mr-1 text-right">右軸顯示</span>
-                                <div className="mode-toggle">
-                                    <div className=${"mode-btn flex-1 text-center r-prf" + (axis.prf ? ' active' : '')} onClick=${() => setAxis({ ...axis, prf: !axis.prf })}>獲利率</div>
-                                    <div className=${"mode-btn flex-1 text-center r-tmv" + (axis.tmv ? ' active' : '')} onClick=${() => setAxis({ ...axis, tmv: !axis.tmv })}>時間價值</div>
-                                </div>
-                            </div>
-                        </div>
+                        <${LinePicker} shown=${shown} setShown=${setShown} />
                         ${loading ? html`<div className="h-[440px] flex items-center justify-center text-slate-400 font-bold text-sm">資料同步中…</div>`
-                                  : html`<${PerfChart} acc=${acc} demo=${(demoWeek && demoWeek.series) || []} range=${range} axis=${axis} wholeWeek=${wholeWeek} />`}
+                                  : html`<${PerfChart} acc=${acc} demo=${(demoWeek && demoWeek.series) || []} range=${range} shown=${shown} wholeWeek=${wholeWeek} />`}
                         ${!loading && !acc.some(p => p.t >= range[0] && p.t <= range[1]) && html`<p className="text-center text-xs font-bold text-slate-400 -mt-2 pb-2">這一盤還沒有這個帳號的走勢資料</p>`}
                     </div>
 
