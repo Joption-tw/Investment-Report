@@ -1,4 +1,5 @@
 // 歐大的投資報表：總表（index.html）與各帳號頁（account.html）共用的資料處理與元件（需先載入 React、htm）
+// 改了這個檔，記得把 index.html、account.html 裡 common.js?v= 的版本號一起改掉（瀏覽器會快取這個檔 10 分鐘，新舊版混用會整頁空白）
 const html = htm.bind(React.createElement);
 
 // ===== 資料來源 =====
