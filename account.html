@@ -164,13 +164,11 @@
                 return () => clearInterval(timer);
             }, [name, week, isCurrent, loadWeek]);
 
+            // 每個帳號頁單獨分享：不列出其他帳號、不連回總表
             if (!name) return html`
-                <div className="max-w-xl mx-auto p-6 space-y-4">
+                <div className="max-w-xl mx-auto p-6">
                     <h1 className="text-2xl font-black text-slate-800">找不到這個帳號</h1>
-                    <div className="glass-card p-4 grid grid-cols-2 gap-2">
-                        ${ACCOUNTS.map(a => html`<a key=${a.id} href=${accountUrl(a)} className="px-3 py-2 rounded-lg border-2 border-blue-200 bg-blue-50/40 font-black text-slate-700 hover:border-blue-500">${a.name}</a>`)}
-                    </div>
-                    <a href="./" className="text-blue-600 font-bold">← 回總表</a>
+                    <p className="text-sm font-bold text-slate-400 mt-2">請確認網址是否正確。</p>
                 </div>`;
 
             // 該帳號本週走勢：存檔 + 試算表裡還留著的快照（同一時間以試算表為準）
@@ -220,8 +218,8 @@
 
             return html`
                 <div className="max-w-[1500px] mx-auto space-y-2 sm:space-y-3 p-1.5 sm:p-4">
-                    <header className="glass-card px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:grid sm:grid-cols-[auto_1fr_auto] items-center gap-3">
-                        <a href="./" className="self-start sm:self-center inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-900 text-yellow-400 font-black text-xs hover:bg-slate-800">← 總表</a>
+                    <header className="glass-card px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:grid sm:grid-cols-[1fr_auto_1fr] items-center gap-3">
+                        <div className="hidden sm:block"></div>
                         <div className="text-center">
                             <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">${name}<span className="text-slate-400 font-bold text-lg sm:text-2xl ml-2">即時績效</span></h1>
                             <div className="flex items-center justify-center gap-2 flex-wrap mt-1">
@@ -232,7 +230,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div className="flex sm:flex-col items-center sm:items-end gap-2">
+                        <div className="flex sm:flex-col items-center sm:items-end sm:justify-self-end gap-2">
                             <span className="text-[10px] font-bold text-slate-400">${updated ? `更新 ${updated.toLocaleTimeString()}` : '--:--:--'}</span>
                             <button onClick=${() => { loadLive(); loadWeek(week, isCurrent); }} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 active:scale-95 text-white rounded-lg font-bold text-xs">↻ 同步數據</button>
                         </div>
@@ -316,12 +314,6 @@
                         <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換上方圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 
-                    <div className="glass-card px-3 sm:px-5 py-3">
-                        <p className="text-[11px] font-black text-slate-500 mb-2">其他帳號</p>
-                        <div className="flex flex-wrap gap-1.5">
-                            ${ACCOUNTS.map(a => html`<a key=${a.id} href=${accountUrl(a)} className=${"px-3 py-1.5 rounded-lg border-2 text-xs font-black " + (a.id === ACCT.id ? 'border-orange-400 bg-orange-50 text-orange-600' : 'border-blue-200 bg-blue-50/40 text-slate-700 hover:border-blue-500')}>${a.name}</a>`)}
-                        </div>
-                    </div>
                 </div>`;
         };
 
