@@ -205,7 +205,8 @@
             const [loading, setLoading]   = useState(true);
             const [copied, setCopied]     = useState(false);
 
-            // 橡皮擦：塗掉的點 = 試算表「塗掉紀錄」＋這次在頁面上塗 / 還原的；只有輸入過密碼的瀏覽器看得到橡皮擦（第一次用 &edit=1 打開）
+            // 橡皮擦：塗掉的點 = 試算表「塗掉紀錄」（隱藏分頁）＋這次在頁面上塗 / 還原的；只有輸入過密碼的瀏覽器看得到橡皮擦（第一次用 &edit=1 打開）
+            // 一般人看到的圖不會有任何塗掉的痕跡：塗掉的點直接不畫，前後兩點連起來
             const [erased, setErased]       = useState(() => new Set());
             const [overrides, setOverrides] = useState(() => new Map());
             const [eraser, setEraser]       = useState(false);
@@ -228,7 +229,7 @@
                         if (j.error === '密碼錯誤') { setEraseKeyStore(''); setEraser(false); }
                         setEraseMsg(`沒有存到：${j.error}`); return;
                     }
-                    setEraseMsg(`${action === 'erase' ? '已塗掉' : '已還原'} ${items.length} 點，所有人都會看到`);
+                    setEraseMsg(`${action === 'erase' ? '已塗掉' : '已還原'} ${items.length} 點`);
                 } catch (e) { setEraseMsg('沒有存到：連線失敗，請再試一次'); }
             };
             const onErase = found => {

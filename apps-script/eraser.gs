@@ -7,6 +7,7 @@
 //   2. 把 setErasePassword 裡的密碼改掉 → 執行 setErasePassword（第一次會要求授權）
 //   3. 「部署」→「新增部署作業」→ 類型「網頁應用程式」，執行身分「我」、存取權「所有人」→ 部署
 //   4. 把網頁應用程式網址填到網站 common.js 的 ERASE_API
+//   5. 回試算表把「塗掉紀錄」分頁隱藏（右鍵分頁 →「隱藏工作表」），看試算表的人就看不到；網站照樣讀得到
 
 const ERASE_SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
 const ERASE_TAB      = '塗掉紀錄';
