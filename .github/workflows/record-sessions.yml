@@ -1,0 +1,36 @@
+name: 每盤績效存檔
+
+# 試算表「績效表」只保留最近約 16 小時的快照，所以每小時把收完的盤存到 data/sessions.json
+# （早盤 13:45、夜盤 05:00 收盤；有新收完的盤才會 commit，一天約 2 次）
+# GitHub 排程用 UTC：台灣時間 = UTC + 8
+on:
+  schedule:
+    - cron: '20 * * * *'
+  workflow_dispatch:            # 可在 GitHub Actions 頁面手動執行
+  push:
+    paths:
+      - 'scripts/record_sessions.py'
+      - '.github/workflows/record-sessions.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: record-sessions
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/record_sessions.py
+      - name: 有變動才 commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then echo "無變動"; exit 0; fi
+          git commit -m "每盤績效存檔 $(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')"
+          git pull --rebase
+          git push
