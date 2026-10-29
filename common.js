@@ -358,7 +358,7 @@ const WinStrip = ({ rows, selected, onPick }) => html`
         })}
     </div>`;
 
-// 每盤績效表：日期 / 盤別 / 勝負 / 百點震幅 / BA / BB / VIX / 獲利金額 / (個人獲利) / 獲利率 / 累積獲利率
+// 每盤績效表：日期 / 盤別 / 勝負 / 獲利金額 / (個人獲利) / 獲利率 / 累積獲利率 / 百點震幅 / BA / BB / VIX
 const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
     const s = summarize(rows);
     const latestIdx = s.lastRow ? s.lastRow.i : -1;
@@ -369,8 +369,8 @@ const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
                 <thead>
                     <tr className="bg-slate-900 text-slate-300">
                         <th className=${TH}>日期</th><th className=${TH}>盤別</th><th className=${TH}>勝負</th>
-                        <th className=${TH}>百點震幅</th><th className=${TH}>週三時價 (BA)</th><th className=${TH}>週五時價 (BB)</th><th className=${TH}>VIX</th>
                         <th className=${TH}>獲利金額</th>${showPersonal && html`<th className=${TH}>個人獲利</th>`}<th className=${TH}>獲利率</th><th className=${TH}>累積獲利率</th>
+                        <th className=${TH}>百點震幅</th><th className=${TH}>週三時價 (BA)</th><th className=${TH}>週五時價 (BB)</th><th className=${TH}>VIX</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -394,14 +394,14 @@ const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
                                 <td className=${TD + " text-slate-800 font-black"}>${slotName(r)}${tag}</td>
                                 <td className=${TD + " text-center"}>${r.pending ? html`<span className="text-[11px] text-slate-400">結算中</span>`
                                     : res ? html`<span className=${"inline-flex items-center justify-center rounded-md font-black w-8 h-7 text-sm " + RESULT[res].badge}>${RESULT[res].text}</span>` : DASH}</td>
-                                <td className=${TD + " text-right text-slate-800"}>${m.swing !== undefined ? fmtInt(m.swing) : DASH}</td>
-                                <td className=${TD + " text-right leading-tight"}>${valCell(m.ba, 'text-red-600')}</td>
-                                <td className=${TD + " text-right leading-tight"}>${valCell(m.bb, 'text-green-600')}</td>
-                                <td className=${TD + " text-right leading-tight"}>${r.def.type === 'D' ? valCell(m.vix, 'text-amber-600', 2) : DASH}</td>
                                 <td className=${TD + " text-right text-sm font-black " + toneOf(r.pnl)}>${r.pnl !== undefined ? sgnInt(r.pnl) : DASH}${r.approx ? html`<span className="text-[9px] text-slate-400 ml-0.5" title="前一盤未記錄，以本盤第一筆快照為基準">≈</span>` : null}</td>
                                 ${showPersonal && html`<td className=${TD + " text-right " + toneOf(r.personal)}>${r.personal !== undefined && r.personal !== null ? sgnInt(r.personal) : DASH}</td>`}
                                 <td className=${TD + " text-right text-sm font-black " + toneOf(r.rate)}>${r.rate !== undefined && r.rate !== null ? sgnPct(r.rate) : DASH}</td>
                                 <td className=${TD + " text-right " + toneOf(r.cum)}>${r.cum !== undefined && r.cum !== null && !r.pending ? sgnPct(r.cum) : DASH}</td>
+                                <td className=${TD + " text-right text-slate-800"}>${m.swing !== undefined ? fmtInt(m.swing) : DASH}</td>
+                                <td className=${TD + " text-right leading-tight"}>${valCell(m.ba, 'text-red-600')}</td>
+                                <td className=${TD + " text-right leading-tight"}>${valCell(m.bb, 'text-green-600')}</td>
+                                <td className=${TD + " text-right leading-tight"}>${r.def.type === 'D' ? valCell(m.vix, 'text-amber-600', 2) : DASH}</td>
                             </tr>`;
                     })}
                 </tbody>
@@ -409,11 +409,12 @@ const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
                     <tfoot>
                         <tr className="bg-slate-50 font-black">
                             <td className=${TD + " text-slate-800"} colSpan="2">本週合計</td>
-                            <td className=${TD + " text-center text-slate-600"} colSpan="5">已開 ${s.opened.length} 盤 · <span className="text-red-600">勝 ${s.win}</span> · <span className="text-emerald-600">敗 ${s.lose}</span></td>
+                            <td className=${TD + " text-center text-slate-600 whitespace-nowrap"}><span className="text-red-600">勝 ${s.win}</span> · <span className="text-emerald-600">敗 ${s.lose}</span></td>
                             <td className=${TD + " text-right text-sm " + toneOf(s.lastRow.state.total.pnl)}>${sgnInt(s.lastRow.state.total.pnl)}</td>
                             ${showPersonal && html`<td className=${TD + " text-right " + toneOf(s.lastRow.state.total.personal)}>${s.lastRow.state.total.personal !== null ? sgnInt(s.lastRow.state.total.personal) : '—'}</td>`}
                             <td className=${TD}></td>
                             <td className=${TD + " text-right text-sm " + toneOf(s.cum)}>${s.cum !== null ? sgnPct(s.cum) : '—'}</td>
+                            <td className=${TD + " text-center text-slate-600"} colSpan="4">已開 ${s.opened.length} 盤</td>
                         </tr>
                     </tfoot>`}
             </table>
