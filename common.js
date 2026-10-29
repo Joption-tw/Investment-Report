@@ -283,6 +283,25 @@ const summarize = (rows) => {
     };
 };
 
+// 總表的「當盤獲利」：現在這一盤開盤前的累積獲利（基準），總表每 10 秒的累積獲利減掉它就是當盤
+// 回傳 { label, pending?, acc: { 帳號: { pnl: 基準, base: 起始資產 } }, total }；算不出來時沒有 acc
+const sessionBaseline = (sessions, live) => {
+    const now = slotAt(tpeNow());
+    const rows = buildWeek(now.week, sessions, live && live.week === now.week ? live : null, {}, null);
+    const row = rows[now.slot], label = row.def.label;
+    if (row.pending) return { label, pending: true };
+    const fromState = (state, cur) => {
+        const acc = {};
+        state.accounts.forEach(a => { if (a.pnl !== null) acc[a.name] = { pnl: a.pnl - (cur ? cur[a.name] || 0 : 0), base: a.base }; });
+        return acc;
+    };
+    if (row.state && row.acc) return { label, acc: fromState(row.state, row.acc), total: { pnl: row.state.total.pnl - row.pnl, base: row.state.total.base } };
+    // 剛開盤、快照還沒進來：基準就是上一盤收盤
+    const prev = now.slot > 0 ? rows.slice(0, now.slot).reverse().find(r => r.state) : null;
+    if (!row.state && prev) return { label, acc: fromState(prev.state), total: { pnl: prev.state.total.pnl, base: prev.state.total.base } };
+    return { label };
+};
+
 // ===== 顯示 =====
 const fmtInt = v => Math.round(v).toLocaleString();
 const sgnInt = v => `${v > 0 ? '+' : ''}${fmtInt(v)}`;

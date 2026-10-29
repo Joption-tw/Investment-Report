@@ -8,7 +8,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="common.js?v=20261029a"></script>
+    <script src="common.js?v=20261029b"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -133,6 +133,24 @@
             const [lastUpdated, setLastUpdated] = useState(null);
             const [countdown, setCountdown]     = useState(10);
             const [topStats, setTopStats]       = useState({ timeValue: '0.0', futureIndex: '0.0', pointsChange: '0.0', percentChange: '0%' });
+            // 收完的盤 + 最新快照：給上面總表算「當盤獲利」、給下面每盤績效表用
+            const [sessions, setSessions]       = useState([]);
+            const [live, setLive]               = useState(null);
+
+            const loadSessions = useCallback(async () => {
+                const t = Date.now();
+                const [s, l] = await Promise.allSettled([
+                    fetch(`${SESSIONS_URL}?t=${t}`).then(r => r.ok ? r.json() : null),
+                    fetch(`${LIVE_URL}&t=${t}`).then(r => r.ok ? r.text() : '')
+                ]);
+                if (s.status === 'fulfilled' && s.value) setSessions(s.value.sessions || []);
+                if (l.status === 'fulfilled' && l.value) { const snap = parseSnapshots(parseCSV(l.value))[0]; setLive(snap ? { ...snap, live: true } : null); }
+            }, []);
+            useEffect(() => {
+                loadSessions();
+                const timer = setInterval(loadSessions, 60000);
+                return () => clearInterval(timer);
+            }, [loadSessions]);
 
             const fetchData = useCallback(async (isAuto = false) => {
                 setCountdown(10);
@@ -183,20 +201,49 @@
 
             const handleManualRefresh = () => { if (!refreshing) fetchData(true); };
 
+            // 當盤獲利 = 總表的累積獲利 − 這一盤開盤前的累積獲利；放在「獲利率」後面，紅 = 賺、綠 = 賠
+            const baseline = sessionBaseline(sessions, live);
+            const pnlIdx   = headers.findIndex(h => h.includes('獲利金額'));
+            const rateIdx  = headers.findIndex(h => h.includes('獲利率'));
+            const sessCol  = pnlIdx !== -1 && rateIdx !== -1 ? rateIdx : -1;
+            const sessLabel = `當盤獲利${baseline ? `（${baseline.label}）` : ''}`;
+            const keyOfName = n => (accountOf(n) || {}).id || cleanName(n);
+            const sessOf = row => {
+                const name = (row[0] || '').trim();
+                if (!baseline || name.includes('參考')) return null;
+                if (baseline.pending) return { pending: true };
+                const b = name.startsWith('歐大總績效') ? baseline.total
+                        : Object.entries(baseline.acc || {}).filter(([k]) => keyOfName(k) === keyOfName(name)).map(([, v]) => v)[0];
+                const cur = toNum(row[pnlIdx]);
+                if (!b || b.pnl === null || cur === null) return null;
+                const pnl = cur - b.pnl;
+                return { pnl, rate: b.base ? pnl / b.base * 100 : null };
+            };
+            const sessText = s => !s ? { pnl: '—', rate: '—', cls: 'text-slate-300' }
+                : s.pending ? { pnl: '結算中', rate: '結算中', cls: 'text-slate-400' }
+                : { pnl: sgnInt(s.pnl), rate: s.rate !== null ? sgnPct(s.rate) : '—', cls: (RESULT[resultOf(Math.round(s.pnl))] || {}).cell || 'text-slate-500' };
+            const sessCells = row => {
+                const t = sessText(sessOf(row));
+                const cls = "px-4 py-2.5 text-xs font-black font-mono-data text-center " + t.cls;
+                return [html`<td key="sp" className=${cls}>${t.pnl}</td>`, html`<td key="sr" className=${cls}>${t.rate}</td>`];
+            };
+
+            const renderCell = (cell, cIdx) => {
+                const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(headers[cIdx] || '', cell);
+                let cls = "px-4 py-2.5 text-xs font-bold font-mono-data text-center ";
+                if (isDisc)              cls += "bg-red-600 text-white animate-pulse";
+                else if (isAlertExtreme) cls += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
+                else if (marginClass)    cls += marginClass;
+                else if (ratioGradient)  cls += ratioGradient;
+                else if (isNeg)          cls += "text-red-500";
+                else                     cls += "text-slate-700";
+                const acct = cIdx === 0 && accountOf(cell);
+                if (acct) return html`<td key=${cIdx} className=${cls}><a href=${accountUrl(acct)} title="看這個帳號的獨立績效頁" className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${cell}</a></td>`;
+                return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
+            };
+
             const renderDesktopRows = () => data.map((row, rIdx) => {
-                const cells = row.map((cell, cIdx) => {
-                    const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(headers[cIdx] || '', cell);
-                    let cls = "px-4 py-2.5 text-xs font-bold font-mono-data text-center ";
-                    if (isDisc)              cls += "bg-red-600 text-white animate-pulse";
-                    else if (isAlertExtreme) cls += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
-                    else if (marginClass)    cls += marginClass;
-                    else if (ratioGradient)  cls += ratioGradient;
-                    else if (isNeg)          cls += "text-red-500";
-                    else                     cls += "text-slate-700";
-                    const acct = cIdx === 0 && accountOf(cell);
-                    if (acct) return html`<td key=${cIdx} className=${cls}><a href=${accountUrl(acct)} title="看這個帳號的獨立績效頁" className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${cell}</a></td>`;
-                    return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
-                });
+                const cells = row.flatMap((cell, cIdx) => cIdx === sessCol ? [renderCell(cell, cIdx), ...sessCells(row)] : [renderCell(cell, cIdx)]);
                 return html`<tr key=${rIdx} className="hover:bg-slate-50 transition-colors">${cells}</tr>`;
             });
 
@@ -217,6 +264,15 @@
                             <span className=${"text-xs font-mono-data font-black leading-none " + textClass}>${cell || '0'}</span>
                         </div>`;
                 });
+                if (sessCol !== -1) {
+                    const t = sessText(sessOf(row));
+                    const item = (k, label, v) => html`
+                        <div key=${k} className=${"flex justify-between items-center border-b border-slate-50 py-1 px-1.5 rounded " + t.cls}>
+                            <span className="text-[9px] font-black leading-none tracking-tighter text-slate-500">${label}</span>
+                            <span className="text-xs font-mono-data font-black leading-none">${v}</span>
+                        </div>`;
+                    cardRows.splice(sessCol, 0, item('sp', sessLabel, t.pnl), item('sr', '當盤獲利率', t.rate));
+                }
                 return html`
                     <div key=${rIdx} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                         <div className="bg-slate-900 px-3 py-1.5 flex justify-between items-center">
@@ -250,7 +306,12 @@
                                 <table className="w-full text-left">
                                     <thead>
                                         <tr className="bg-slate-900 text-slate-300">
-                                            ${headers.map((h, i) => html`<th key=${i} className="px-4 py-3 text-[11px] font-black uppercase tracking-wider text-center border-slate-800">${h}</th>`)}
+                                            ${headers.flatMap((h, i) => {
+                                const th = html`<th key=${i} className="px-4 py-3 text-[11px] font-black uppercase tracking-wider text-center border-slate-800">${h}</th>`;
+                                return i !== sessCol ? [th] : [th,
+                                    html`<th key="sp" className="px-4 py-3 text-[11px] font-black tracking-wider text-center text-yellow-400 bg-slate-800 whitespace-nowrap">${sessLabel}</th>`,
+                                    html`<th key="sr" className="px-4 py-3 text-[11px] font-black tracking-wider text-center text-yellow-400 bg-slate-800 whitespace-nowrap">當盤獲利率</th>`];
+                            })}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -343,28 +404,17 @@
                     <main className="p-1 sm:p-4 bg-[#f1f5f9]">
                         ${mainContent}
                     </main>
-                    <${SessionPanel} />
+                    <${SessionPanel} sessions=${sessions} live=${live} />
                 </div>`;
         };
 
         // ===== 每盤績效表：一週 10 盤，每一盤的勝敗（資料處理與表格在 common.js）=====
-        const SessionPanel = () => {
-            const [sessions, setSessions]     = useState([]);
-            const [live, setLive]             = useState(null);
+        const SessionPanel = ({ sessions, live }) => {
             const [liveMarket, setLiveMarket] = useState({});
             const [liveVix, setLiveVix]       = useState(null);
             const [viewWeek, setViewWeek]     = useState('');
             const currentWeek = (live && live.week) || slotAt(tpeNow()).week;
 
-            const loadLive = useCallback(async () => {
-                const t = Date.now();
-                const [s, l] = await Promise.allSettled([
-                    fetch(`${SESSIONS_URL}?t=${t}`).then(r => r.ok ? r.json() : null),
-                    fetch(`${LIVE_URL}&t=${t}`).then(r => r.ok ? r.text() : '')
-                ]);
-                if (s.status === 'fulfilled' && s.value) setSessions(s.value.sessions || []);
-                if (l.status === 'fulfilled' && l.value) { const snap = parseSnapshots(parseCSV(l.value))[0]; setLive(snap ? { ...snap, live: true } : null); }
-            }, []);
             const loadMarket = useCallback(async () => {
                 const week = slotAt(tpeNow()).week;
                 const [d, v] = await Promise.allSettled([
@@ -376,11 +426,10 @@
             }, []);
 
             useEffect(() => {
-                loadLive(); loadMarket();
-                const t1 = setInterval(loadLive, 60000);
-                const t2 = setInterval(loadMarket, 120000);
-                return () => { clearInterval(t1); clearInterval(t2); };
-            }, [loadLive, loadMarket]);
+                loadMarket();
+                const timer = setInterval(loadMarket, 120000);
+                return () => clearInterval(timer);
+            }, [loadMarket]);
 
             const week = viewWeek || currentWeek;
             const isCurrent = week === currentWeek;
