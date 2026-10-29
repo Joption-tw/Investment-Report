@@ -174,7 +174,9 @@
                             pointsChange:  globalRow[1] || '0',
                             percentChange: globalRow[2] || '0%'
                         });
-                        const filteredHeaders = originalHeaders.filter((_, idx) => idx !== tvIdx && idx !== fiIdx);
+                        // 試算表「資產」後面那欄的標題格是數字（不是欄名），顯示成「初始金額」
+                        const filteredHeaders = originalHeaders.filter((_, idx) => idx !== tvIdx && idx !== fiIdx)
+                            .map(h => /^-?[\d,]+(\.\d+)?$/.test(h.trim()) ? '初始金額' : h);
                         const filteredData    = originalData.map(row => row.filter((_, idx) => idx !== tvIdx && idx !== fiIdx));
                         setHeaders(filteredHeaders);
                         setData(filteredData);
