@@ -283,6 +283,22 @@ const summarize = (rows) => {
     };
 };
 
+// 已收盤、但 GitHub 排程還沒存進 sessions.json 的盤（排程常延誤好幾個小時）：直接從「兩分鐘紀錄」抓收盤前最後一筆補上
+const fillMissing = async (sessions, week) => {
+    const now = nowStr();
+    const missing = SLOT_DEFS.map((_, i) => i).filter(i => slotEnd(week, i) <= now && !sessions.some(s => s.week === week && s.slot === i));
+    if (!missing.length) return sessions;
+    const cond = missing.map(i => { const end = wallMs(slotEnd(week, i)); return `(A >= '${stampOf(end - 10 * 60e3)}' and A <= '${stampOf(end + 60e3)}')`; }).join(' or ');
+    const url = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}&tq=${encodeURIComponent(`select * where ${cond}`)}`;
+    const text = await fetch(`${url}&t=${Date.now()}`).then(r => r.ok ? r.text() : '').catch(() => '');
+    const snaps = text ? parseLog(parseCSV(text)) : [];
+    const filled = missing.map(i => {
+        const s = snaps.find(x => x.week === week && x.slot === i);   // parseLog 新的在前 → 收盤前最後一筆
+        return s ? { week, slot: i, at: stampOf(s.t), fut: s.fut, total: s.total, accounts: s.accounts, filled: true } : null;
+    }).filter(Boolean);
+    return filled.length ? [...sessions, ...filled].sort((a, b) => a.week < b.week ? -1 : a.week > b.week ? 1 : a.slot - b.slot) : sessions;
+};
+
 // 總表的「當盤獲利」：現在這一盤開盤前的累積獲利（基準），總表每 10 秒的累積獲利減掉它就是當盤
 // 回傳 { label, pending?, acc: { 帳號: { pnl: 基準, base: 起始資產 } }, total }；算不出來時沒有 acc
 const sessionBaseline = (sessions, live) => {

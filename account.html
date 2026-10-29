@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
-    <script src="common.js?v=20261029b"></script>
+    <script src="common.js?v=20261029c"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         html, body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
@@ -302,7 +302,7 @@
                 const since = new Date(tpeNow().getTime() - 3 * 3600e3).toISOString().slice(0, 19).replace('T', ' ').replace(/-/g, '/');
                 const [s, sn, lg, v, er] = await Promise.all([getJSON(`${SESSIONS_URL}?t=${t}`), getText(`${SNAPS_URL}&t=${t}`), getText(`${LOG_URL(since)}&t=${t}`),
                                                               getJSON(VIX_URL), getText(`${ERASE_LOG_URL}&t=${t}`)]);
-                if (s) setSessions(s.sessions || []);
+                if (s) setSessions(await fillMissing(s.sessions || [], slotAt(tpeNow()).week));
                 if (er) setErased(parseErasures(parseCSV(er)));
                 if (sn || lg) setSnaps([...(lg ? parseLog(parseCSV(lg)) : []), ...(sn ? parseSnapshots(parseCSV(sn)) : [])].sort((a, b) => b.t - a.t));
                 setVix(parseVix(v));
