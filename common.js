@@ -244,7 +244,9 @@ const buildWeek = (week, sessions, live, liveMarket, liveVix) => {
         const date = slotDate(week, i);
         const state = recorded[i] || (live && live.week === week && live.slot === i ? live : null);
         const market = { ...(liveMarket[i] || {}), ...((recorded[i] && recorded[i].market) || {}) };
-        if (def.type === 'D' && !market.vix && liveVix && liveVix.date === date) market.vix = liveVix.vix;
+        // VIX 只有日盤有：夜盤用同一天日盤的 VIX（舊存檔的夜盤沒存，從同一天的日盤找）
+        if (!market.vix) { const day = sessions.find(s => s.date === date && s.market && s.market.vix); if (day) market.vix = day.market.vix; }
+        if (!market.vix && liveVix && liveVix.date === date) market.vix = liveVix.vix;
         if (!state) {
             const status = now < slotOpen(week, i) ? '尚未開盤' : now < slotEnd(week, i) ? '等待資料' : '無紀錄';
             return { i, def, date, status, market };
@@ -401,7 +403,7 @@ const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
                                 <td className=${TD + " text-right text-slate-800"}>${m.swing !== undefined ? fmtInt(m.swing) : DASH}</td>
                                 <td className=${TD + " text-right leading-tight"}>${valCell(m.ba, 'text-red-600')}</td>
                                 <td className=${TD + " text-right leading-tight"}>${valCell(m.bb, 'text-green-600')}</td>
-                                <td className=${TD + " text-right leading-tight"}>${r.def.type === 'D' ? valCell(m.vix, 'text-amber-600', 2) : DASH}</td>
+                                <td className=${TD + " text-right leading-tight"}>${valCell(m.vix, 'text-amber-600', 2)}</td>
                             </tr>`;
                     })}
                 </tbody>

@@ -192,7 +192,8 @@ def market(s):
             out['swing'] = swing100([num(c[22]) for c in seg])
             out['ba'] = last_chg([num(c[52]) for c in seg])
             out['bb'] = last_chg([num(c[53]) for c in seg])
-    if s['type'] == 'D' and not out.get('vix'):
+    # 夜盤沒有 VIX：用同一天日盤的 VIX
+    if not out.get('vix'):
         out['vix'] = vix_day(date)
     return out
 
@@ -275,7 +276,7 @@ def main():
     for s in by_id.values():
         if (now.date() - datetime.strptime(s['date'], '%Y-%m-%d').date()).days > 14: continue
         m = s.get('market') or {}
-        if 'swing' in m and (s['type'] == 'N' or m.get('vix')): continue
+        if 'swing' in m and m.get('vix'): continue
         s['market'] = market(s)
 
     sessions = sorted(by_id.values(), key=lambda s: (s['week'], s['slot']))
