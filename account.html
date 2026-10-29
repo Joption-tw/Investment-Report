@@ -50,24 +50,34 @@
         const AXES = {
             fut:    { name: '期指',   side: 'left',  color: '#2563eb', scale: true },
             pts:    { name: '總點',   side: 'left',  color: '#475569', min: 0 },
-            rate:   { name: '獲利%',  side: 'right', color: '#e11d48', scale: true, fmt: v => `${v}%` },
-            pnl:    { name: '獲利',   side: 'right', color: '#d97706', scale: true },
+            rate:   { name: '獲利%',  side: 'right', color: '#e11d48', fmt: v => `${v}%` },
+            pnl:    { name: '獲利',   side: 'right', color: '#d97706' },
             price:  { name: '時價',   side: 'right', color: '#9333ea', scale: true },
             ratio:  { name: '比值',   side: 'right', color: '#ca8a04', min: 0, max: 1 },
             margin: { name: '剩餘%',  side: 'right', color: '#6366f1', min: 0, max: 100, fmt: v => `${v}%` }
         };
         const AXIS_KEYS = Object.keys(AXES);
-        // 線的樣式跟 sample 網站一樣：平滑、2.2 粗、淡陰影；獲利率只畫漸層面積；最高 / 最低點標數字（peak）
+        // 線的樣式跟 sample 網站一樣：平滑、2.2 粗、淡陰影；最高 / 最低點標數字（peak）
+        // 獲利率 / 獲利金額畫「當盤」的（field：每盤從 0 起算，不累積）；獲利率畫面積：賺 = 淡粉紅、賠 = 淡綠
         const SERIES_DEFS = [
             { key: 'fut',    label: '期指',           axis: 'fut',    color: '#2563eb', src: 'demo', z: 5, peak: { max: '#ef4444', min: '#10b981', bold: true } },
             { key: 'pts',    label: '總點數',         axis: 'pts',    color: '#334155', src: 'acc',  z: 5, peak: { max: '#64748b' } },
-            { key: 'rate',   label: '獲利率',         axis: 'rate',   color: '#e11d48', src: 'acc',  z: 1, area: true, unit: '%', d: 2, peak: { max: '#22d3ee', min: '#ec4899', bold: true } },
-            { key: 'pnl',    label: '獲利金額',       axis: 'pnl',    color: '#d97706', src: 'acc',  z: 3 },
+            { key: 'rate',   label: '獲利率',         axis: 'rate',   color: '#e11d48', src: 'acc',  z: 1, field: 'srate', area: true, unit: '%', d: 2, peak: { max: '#22d3ee', min: '#ec4899', bold: true } },
+            { key: 'pnl',    label: '獲利金額',       axis: 'pnl',    color: '#d97706', src: 'acc',  z: 3, field: 'spnl' },
             { key: 'ba',     label: '週三時價',       axis: 'price',  color: '#ef4444', src: 'demo', z: 4, peak: { max: '#ef4444' } },
             { key: 'bb',     label: '週五時價',       axis: 'price',  color: '#10b981', src: 'demo', z: 4, peak: { max: '#10b981' } },
             { key: 'ratio',  label: '買權比值',       axis: 'ratio',  color: '#ca8a04', src: 'acc',  z: 3, d: 2 },
             { key: 'margin', label: '保證金剩餘比率', axis: 'margin', color: '#6366f1', src: 'acc',  z: 3, unit: '%' }
         ];
+        const AREA_UP = '#f9a8d4', AREA_DOWN = '#86efac';
+        // 面積從 0 畫到線：0 以上一律粉紅、0 以下一律綠（漸層在 0 的位置硬切換）
+        const signFill = data => {
+            const vs = data.map(d => d[1]).filter(v => v != null);
+            const hi = Math.max(0, ...vs), lo = Math.min(0, ...vs);
+            if (hi === lo) return AREA_UP;
+            const z = hi / (hi - lo);
+            return new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: AREA_UP }, { offset: z, color: AREA_UP }, { offset: z, color: AREA_DOWN }, { offset: 1, color: AREA_DOWN }]);
+        };
         const peakPoints = (s, fmt) => {
             if (!s.peak) return undefined;
             const label = (color, position, offset) => ({ color, position, offset, formatter: p => fmt(p.value, s) });
@@ -131,11 +141,20 @@
                 usedAxes.forEach(k => { offsetOf[k] = count[AXES[k].side]++ * 55; });
                 const byName = Object.fromEntries(SERIES_DEFS.map(s => [s.label, s]));
                 // 每條線：拿掉塗掉的點 → 過濾跳點（示範帳戶資料在上層已過濾）→ 跟前後兩點平均，跟 sample 一樣
+                // 當盤的線（field）在盤與盤之間斷開，下一盤重新從 0 畫起
                 const lines = SERIES_DEFS.map((s, i) => {
                     if (!shown.includes(s.key)) return { def: s, seriesIndex: i, points: [] };
+                    const f = s.field || s.key;
                     let pts = src[s.src].filter(p => !hidden(s, p.t));
-                    if (s.src === 'acc') pts = despike(pts, [s.key]);
-                    return { def: s, seriesIndex: i, points: smooth3(pts.map(p => [p.t, p[s.key]])) };
+                    if (s.src === 'acc') pts = despike(pts, [f]);
+                    const points = smooth3(pts.map(p => [p.t, p[f]]));
+                    if (!s.field) return { def: s, seriesIndex: i, points };
+                    const cut = [];
+                    points.forEach(([t, v], k) => {
+                        if (!k || pts[k].slot !== pts[k - 1].slot) { if (k) cut.push([t - 2 * 60e3, null]); cut.push([t - 60e3, 0]); }
+                        cut.push([t, v]);
+                    });
+                    return { def: s, seriesIndex: i, points: cut };
                 });
                 const fmt = (v, s) => v === null || v === undefined ? '—' : s && s.d ? `${v.toFixed(s.d)}${s.unit || ''}` : `${Math.round(v).toLocaleString()}${s && s.unit || ''}`;
                 chart.current.setOption({
@@ -160,11 +179,12 @@
                         { type: 'slider', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', bottom: 8, height: 24, showDetail: false, brushSelect: false }
                     ],
                     series: lines.map(({ def: s, points: data }) => {
+                        const color = s.area ? signFill(data) : s.color;
                         return {
-                            name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, connectNulls: true,
+                            name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, connectNulls: !s.field,
                             smooth: true, showSymbol: false, z: s.z,
-                            lineStyle: { width: s.area ? 0 : 2.2, color: s.color, shadowBlur: 3 }, itemStyle: { color: s.color }, emphasis: { disabled: true },
-                            areaStyle: s.area ? { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(225, 29, 72, 0.7)' }, { offset: 1, color: 'rgba(225, 29, 72, 0.05)' }]) } : undefined,
+                            lineStyle: s.area ? { width: 1, color } : { width: 2.2, color, shadowBlur: 3 }, itemStyle: { color: s.area ? s.color : color }, emphasis: { disabled: true },
+                            areaStyle: s.area ? { color, opacity: 0.35 } : undefined,
                             markPoint: data.length ? peakPoints(s, fmt) : undefined,
                             markLine: s.key === 'rate' && data.length ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined
                         };
@@ -368,6 +388,18 @@
             const latestSnap = isCurrent && snaps[0] ? accountView(snaps[0], name) : null;
             const rows = buildWeek(week, views, latestSnap ? { ...latestSnap, live: true } : null, (demoWeek && demoWeek.market) || {}, isCurrent ? vix : null);
             const sum = summarize(rows);
+            // 走勢圖的獲利 / 獲利率每盤從 0 起算：減掉上一盤收盤時的累積獲利（跟下方每盤績效表同一個基準）
+            const accChart = (() => {
+                const baseOf = {};
+                return acc.map((p, k) => {
+                    if (!(p.slot in baseOf)) {
+                        const r = rows[p.slot], before = k ? acc[k - 1] : null;
+                        baseOf[p.slot] = r && r.pnl !== undefined ? r.state.total.pnl - r.pnl : p.slot === 0 ? 0 : before ? before.pnl : p.pnl;
+                    }
+                    const spnl = p.pnl - baseOf[p.slot];
+                    return { ...p, spnl, srate: p.base ? +(spnl / p.base * 100).toFixed(4) : null };
+                });
+            })();
             const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week)])].sort().reverse();
 
             const autoSel = sum.lastRow ? sum.lastRow.i : (rows.find(r => r.live) || {}).i || 0;
@@ -470,7 +502,7 @@
                                 </div>`;
                         })()}
                         ${loading ? html`<div className="h-[440px] flex items-center justify-center text-slate-400 font-bold text-sm">資料同步中…</div>`
-                                  : html`<${PerfChart} acc=${acc} demo=${demoSeries} range=${range} shown=${shown} wholeWeek=${wholeWeek}
+                                  : html`<${PerfChart} acc=${accChart} demo=${demoSeries} range=${range} shown=${shown} wholeWeek=${wholeWeek}
                                                      hidden=${hidden} eraser=${eraser} onErase=${onErase} onEraseEnd=${onEraseEnd} />`}
                         ${!loading && !acc.some(p => p.t >= range[0] && p.t <= range[1]) && html`<p className="text-center text-xs font-bold text-slate-400 -mt-2 pb-2">這一盤還沒有這個帳號的走勢資料</p>`}
                     </div>
