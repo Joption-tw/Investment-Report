@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
-    <script src="common.js?v=20261029e"></script>
+    <script src="common.js?v=20261031b"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         html, body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
@@ -388,6 +388,8 @@
             const latestSnap = isCurrent && snaps[0] ? accountView(snaps[0], name) : null;
             const rows = buildWeek(week, views, latestSnap ? { ...latestSnap, live: true } : null, (demoWeek && demoWeek.market) || {}, isCurrent ? vix : null);
             const sum = summarize(rows);
+            const ptsDef = SERIES_DEFS.find(s => s.key === 'pts');
+            const trades = tradeStats(week, acc.filter(p => !hidden(ptsDef, p.t)), (demoWeek && demoWeek.series) || []);
             // 走勢圖的獲利 / 獲利率每盤從 0 起算：減掉上一盤收盤時的累積獲利（跟下方每盤績效表同一個基準）
             const accChart = (() => {
                 const baseOf = {};
@@ -518,7 +520,7 @@
                             </label>
                         </div>
                         <${WinStrip} rows=${rows} selected=${cur} onPick=${pick} />
-                        <${SessionTable} rows=${rows} showPersonal=${false} selected=${cur} onPick=${pick} />
+                        <${SessionTable} rows=${rows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
                         <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換上方圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 

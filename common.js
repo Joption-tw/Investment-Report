@@ -223,6 +223,30 @@ const parseVix = (v) => {
     return { date: `${td.slice(0, 4)}-${td.slice(4, 6)}-${td.slice(6, 8)}`, vix: lastChg(vals, v.quote && v.quote.ref) };
 };
 
+// 單一帳號每盤的進出場（同 sample 的畫面）：進場 = 第一次有部位、出場 = 第一次回到 0（一直沒出場 = 持倉中）
+// 進場百點震幅：每段持倉各算一次期指百點震幅再加總（空手時的震盪不算）；期指用未過濾的原始值，跟 sample 同算法
+// 示範帳戶試算表的時間標籤比兩分鐘紀錄晚 2 分鐘（同一筆資料），算震幅時對齊
+const FUT_LAG = 2 * 60e3;
+const tradeStats = (week, points, futs) => {
+    const out = {};
+    SLOT_DEFS.forEach((_, i) => {
+        const open = wallMs(slotOpen(week, i)), end = wallMs(slotEnd(week, i)) + 60e3;
+        const pts = points.filter(p => p.t >= open && p.t <= end && p.pts !== null && p.pts !== undefined);
+        if (!pts.length) return;
+        const fut = futs.filter(f => f.t >= open && f.t <= end + FUT_LAG);
+        const onGrid = t => t - t % 60e3 + FUT_LAG;
+        const swingIn = (a, b) => swing100(fut.filter(f => f.t >= onGrid(a) && f.t <= onGrid(b)).map(f => f.fut));
+        let entry = null, exit = null, seg = null, swing = 0;
+        pts.forEach(p => {
+            if (seg === null) { if (p.pts !== 0) { seg = p.t; if (entry === null) entry = p.t; } }
+            else if (p.pts === 0) { swing += swingIn(seg, p.t); if (exit === null) exit = p.t; seg = null; }
+        });
+        if (seg !== null) swing += swingIn(seg, pts[pts.length - 1].t);
+        out[i] = { entry, exit, holding: seg !== null, swing: entry !== null && fut.length ? swing : null };
+    });
+    return out;
+};
+
 // 只看某一個帳號：把該帳號當成「合計」（週三夜盤歸零的判斷仍用全部帳號的起始資產）
 const accountView = (s, name) => {
     const a = s.accounts.find(x => x.name === name);
@@ -360,19 +384,24 @@ const WinStrip = ({ rows, selected, onPick }) => html`
         })}
     </div>`;
 
-// 每盤績效表：日期 / 盤別 / 勝負 / 獲利金額 / (個人獲利) / 獲利率 / 累積獲利率 / 百點震幅 / BA / BB / VIX
-const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
+// 每盤績效表：日期 / 盤別 / (進場 / 出場) / 勝負 / 獲利金額 / (個人獲利) / 獲利率 / 累積獲利率 / (進場百點震幅) / 百點震幅 / BA / BB / VIX
+// trades：單一帳號頁才有，tradeStats 算出來的每盤進出場
+const SessionTable = ({ rows, showPersonal, trades, selected, onPick }) => {
     const s = summarize(rows);
     const latestIdx = s.lastRow ? s.lastRow.i : -1;
-    const blanks = showPersonal ? 8 : 7;
+    const blanks = (showPersonal ? 8 : 7) + (trades ? 1 : 0);
+    const clock = t => hhmm(t).replace(/^0(?=\d)/, '');
     return html`
         <div className="overflow-x-auto">
             <table className="w-full text-left">
                 <thead>
                     <tr className="bg-slate-900 text-slate-300">
-                        <th className=${TH}>日期</th><th className=${TH}>盤別</th><th className=${TH}>勝負</th>
+                        <th className=${TH}>日期</th><th className=${TH}>盤別</th>
+                        ${trades && html`<th className=${TH}>進場時間點</th><th className=${TH}>出場時間點</th>`}
+                        <th className=${TH}>勝負</th>
                         <th className=${TH}>獲利金額</th>${showPersonal && html`<th className=${TH}>個人獲利</th>`}<th className=${TH}>獲利率</th><th className=${TH}>累積獲利率</th>
-                        <th className=${TH}>百點震幅</th><th className=${TH}>週三時價 (BA)</th><th className=${TH}>週五時價 (BB)</th><th className=${TH}>VIX</th>
+                        ${trades && html`<th className=${TH}>進場百點震幅</th>`}
+                        <th className=${TH}>${trades ? '整盤百點震幅' : '百點震幅'}</th><th className=${TH}>週三時價 (BA)</th><th className=${TH}>週五時價 (BB)</th><th className=${TH}>VIX</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -383,23 +412,29 @@ const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
                             <tr key=${r.i} className=${"text-slate-300" + sel + (pick ? ' cursor-pointer' : '')} onClick=${pick}>
                                 <td className=${TD + " text-center"}>${mdLabel(r.date)}</td>
                                 <td className=${TD}>${slotName(r)}</td>
+                                ${trades && html`<td className=${TD + " text-center"}>—</td><td className=${TD + " text-center"}>—</td>`}
                                 <td className=${TD + " text-center text-[11px]"}>${r.status}</td>
                                 ${[...Array(blanks)].map((_, k) => html`<td key=${k} className=${TD + " text-right"}>—</td>`)}
                             </tr>`;
                         const res = r.pending ? null : resultOf(r.pnl);
                         const m = r.market;
+                        const tr = (trades && trades[r.i]) || {};
                         const tag = r.live ? html`<span className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-bold text-blue-600"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>進行中</span>`
                                   : r.i === latestIdx ? html`<span className="ml-1.5 text-[10px] font-bold text-blue-500">最新</span>` : null;
                         return html`
                             <tr key=${r.i} className=${(res ? RESULT[res].row : '') + sel + (pick ? ' cursor-pointer' : '')} onClick=${pick}>
                                 <td className=${TD + " text-center text-slate-500"}>${mdLabel(r.date)}</td>
                                 <td className=${TD + " text-slate-800 font-black"}>${slotName(r)}${tag}</td>
+                                ${trades && html`
+                                    <td className=${TD + " text-center text-indigo-600 font-bold"}>${tr.entry ? clock(tr.entry) : DASH}</td>
+                                    <td className=${TD + " text-center text-slate-600 font-bold"}>${tr.exit ? clock(tr.exit) : tr.holding ? html`<span className="text-blue-500">持倉中</span>` : DASH}</td>`}
                                 <td className=${TD + " text-center"}>${r.pending ? html`<span className="text-[11px] text-slate-400">結算中</span>`
                                     : res ? html`<span className=${"inline-flex items-center justify-center rounded-md font-black w-8 h-7 text-sm " + RESULT[res].badge}>${RESULT[res].text}</span>` : DASH}</td>
                                 <td className=${TD + " text-right text-sm font-black " + toneOf(r.pnl)}>${r.pnl !== undefined ? sgnInt(r.pnl) : DASH}${r.approx ? html`<span className="text-[9px] text-slate-400 ml-0.5" title="前一盤未記錄，以本盤第一筆快照為基準">≈</span>` : null}</td>
                                 ${showPersonal && html`<td className=${TD + " text-right " + toneOf(r.personal)}>${r.personal !== undefined && r.personal !== null ? sgnInt(r.personal) : DASH}</td>`}
                                 <td className=${TD + " text-right text-sm font-black " + toneOf(r.rate)}>${r.rate !== undefined && r.rate !== null ? sgnPct(r.rate) : DASH}</td>
                                 <td className=${TD + " text-right " + toneOf(r.cum)}>${r.cum !== undefined && r.cum !== null && !r.pending ? sgnPct(r.cum) : DASH}</td>
+                                ${trades && html`<td className=${TD + " text-right text-indigo-600 font-bold"}>${tr.swing !== undefined && tr.swing !== null ? fmtInt(tr.swing) : DASH}</td>`}
                                 <td className=${TD + " text-right text-slate-800"}>${m.swing !== undefined ? fmtInt(m.swing) : DASH}</td>
                                 <td className=${TD + " text-right leading-tight"}>${valCell(m.ba, 'text-red-600')}</td>
                                 <td className=${TD + " text-right leading-tight"}>${valCell(m.bb, 'text-green-600')}</td>
@@ -410,13 +445,13 @@ const SessionTable = ({ rows, showPersonal, selected, onPick }) => {
                 ${s.lastRow && html`
                     <tfoot>
                         <tr className="bg-slate-50 font-black">
-                            <td className=${TD + " text-slate-800"} colSpan="2">本週合計</td>
+                            <td className=${TD + " text-slate-800"} colSpan=${trades ? 4 : 2}>本週合計</td>
                             <td className=${TD + " text-center text-slate-600 whitespace-nowrap"}><span className="text-red-600">勝 ${s.win}</span> · <span className="text-emerald-600">敗 ${s.lose}</span></td>
                             <td className=${TD + " text-right text-sm " + toneOf(s.lastRow.state.total.pnl)}>${sgnInt(s.lastRow.state.total.pnl)}</td>
                             ${showPersonal && html`<td className=${TD + " text-right " + toneOf(s.lastRow.state.total.personal)}>${s.lastRow.state.total.personal !== null ? sgnInt(s.lastRow.state.total.personal) : '—'}</td>`}
                             <td className=${TD}></td>
                             <td className=${TD + " text-right text-sm " + toneOf(s.cum)}>${s.cum !== null ? sgnPct(s.cum) : '—'}</td>
-                            <td className=${TD + " text-center text-slate-600"} colSpan="4">已開 ${s.opened.length} 盤</td>
+                            <td className=${TD + " text-center text-slate-600"} colSpan=${trades ? 5 : 4}>已開 ${s.opened.length} 盤</td>
                         </tr>
                     </tfoot>`}
             </table>
