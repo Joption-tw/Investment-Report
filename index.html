@@ -120,7 +120,10 @@
             const isRatioHeader = header.includes('買權比值') || header.includes('比值平衡');
             const num = parseFloat(val.replace('%', ''));
             const isAlertExtreme = isRatioHeader && !isNaN(num) && (num < RATIO_WARNING || num > (1 - RATIO_WARNING));
-            return { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme };
+            // 獲利金額 / 獲利率跟當盤欄位同一套顏色：紅底 = 賺、綠底 = 賠
+            const pnlNum = header.includes('獲利金額') || header.includes('獲利率') ? toNum(val) : null;
+            const pnlClass = pnlNum === null ? '' : RESULT[resultOf(pnlNum)].cell;
+            return { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass };
         };
 
         const App = () => {
@@ -231,12 +234,13 @@
             };
 
             const renderCell = (cell, cIdx) => {
-                const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(headers[cIdx] || '', cell);
-                let cls = "px-4 py-2.5 text-xs font-bold font-mono-data text-center ";
+                const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass } = getCellStyle(headers[cIdx] || '', cell);
+                let cls = `px-4 py-2.5 text-xs ${pnlClass ? 'font-black' : 'font-bold'} font-mono-data text-center `;
                 if (isDisc)              cls += "bg-red-600 text-white animate-pulse";
                 else if (isAlertExtreme) cls += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
                 else if (marginClass)    cls += marginClass;
                 else if (ratioGradient)  cls += ratioGradient;
+                else if (pnlClass)       cls += pnlClass;
                 else if (isNeg)          cls += "text-red-500";
                 else                     cls += "text-slate-700";
                 const acct = cIdx === 0 && accountOf(cell);
@@ -252,13 +256,14 @@
             const renderMobileCards = () => data.map((row, rIdx) => {
                 const cardRows = headers.slice(1).map((h, i) => {
                     const cell = row[i + 1];
-                    const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme } = getCellStyle(h, cell);
+                    const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass } = getCellStyle(h, cell);
                     let highlightClass = "";
                     let textClass = isNeg ? "text-red-500" : "text-slate-800";
                     if (marginClass)         { highlightClass = marginClass + " rounded"; if (marginClass.includes('text-white')) textClass = "text-white"; }
                     else if (isAlertExtreme) { highlightClass = ratioGradient + " rounded border-2 border-red-600 shadow-inner"; textClass = "text-red-700"; }
                     else if (isDisc)         { highlightClass = "bg-red-600 text-white rounded animate-pulse"; textClass = "text-white"; }
                     else if (ratioGradient)  { highlightClass = ratioGradient + " rounded border border-yellow-400 shadow-sm"; textClass = "text-slate-900"; }
+                    else if (pnlClass)       { highlightClass = pnlClass + " rounded"; textClass = ""; }
                     const labelClass = "text-[9px] font-bold uppercase truncate max-w-[60px] leading-none tracking-tighter " + (highlightClass && textClass === "text-white" ? 'text-white' : 'text-slate-400');
                     return html`
                         <div key=${i} className=${"flex justify-between items-center border-b border-slate-50 py-1 px-1.5 " + highlightClass}>
