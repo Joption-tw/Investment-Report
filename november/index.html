@@ -3,127 +3,204 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+  // 手機直向：整份排成一頁（用電腦版版面寬 1040 排好，再縮到螢幕寬，可雙指放大）；手機橫向：一般寬度 + 兩頁（見下方 CSS）
+  (function () {
+    const meta = document.querySelector('meta[name="viewport"]');
+    const portrait = matchMedia('(orientation: portrait)');
+    const side = Math.min(screen.width, screen.height);
+    function apply() {
+      const on = side < 600 && portrait.matches;
+      document.documentElement.classList.toggle('m-portrait', on);
+      meta.setAttribute('content', on ? `width=1040, initial-scale=${(side / 1040).toFixed(3)}, minimum-scale=${(side / 1040).toFixed(3)}, maximum-scale=6` : 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+      syncVisible();
+    }
+    // 手機橫向用：實際可視範圍（放大時不跟著變，否則版面會亂跳）
+    function syncVisible() {
+      const v = window.visualViewport;
+      if (!v || v.scale > 1.01) return;
+      const st = document.documentElement.style;
+      st.setProperty('--vv-top', `${v.offsetTop}px`);
+      st.setProperty('--vv-h', `${v.height}px`);
+      if (!portrait.matches && (window.scrollX || window.scrollY)) window.scrollTo(0, 0);
+    }
+    apply();
+    portrait.addEventListener('change', apply);
+    if (window.visualViewport) {
+      visualViewport.addEventListener('resize', syncVisible);
+      visualViewport.addEventListener('scroll', syncVisible);
+    }
+  })();
+</script>
 <title>50ETF期權績效表</title>
 <style>
+  /* 版面跟帳號績效頁（account.html）同一套：頁首、數字卡、盤別鈕、選線鈕、深色表頭、右下換頁鈕 */
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
   * { box-sizing: border-box; }
-  body { margin: 0; background: #f1f5f9; color: #0f172a; font-family: "Microsoft JhengHei", "PingFang TC", "Segoe UI", sans-serif; }
-  #root { margin: 0 auto; padding: 10px 33px; }   /* 左右各多留 0.5 公分（約 19px） */
-  .card { background: #fff; border: 1px solid #e8edf3; border-radius: 18px; box-shadow: 0 2px 10px rgba(15,23,42,.06); }
-  header.card { display: flex; align-items: center; gap: 12px; padding: 8px 16px; flex-wrap: wrap; }
-  header h1 { margin: 0; font-size: 20px; font-weight: 900; letter-spacing: 1px; }
-  header .sub { font-size: 11px; color: #64748b; margin-top: 1px; }
-  header .grow { flex: 1; min-width: 200px; }
+  html, body { margin: 0; background: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
+  body { font-family: 'Noto Sans TC', "Microsoft JhengHei", "PingFang TC", Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
   button { font-family: inherit; cursor: pointer; }
-  .btn { border: 0; border-radius: 9px; padding: 6px 12px; font-size: 12px; font-weight: 800; color: #fff; background: #1e293b; }
-  .btn.green { background: #3f8f6b; }
-  #reloadBox { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-  #countdown { display: inline-block; min-width: 34px; margin-left: 4px; padding: 1px 6px; border-radius: 6px; background: rgba(255,255,255,.16); font-variant-numeric: tabular-nums; }
+  button, a, select { touch-action: manipulation; }   /* 可放大的頁面上，按鈕要關掉雙擊縮放 */
+  .hidden { display: none !important; }
+  .up { color: #dc2626; } .down { color: #059669; } .flat { color: #94a3b8; }   /* 紅 = 漲、綠 = 跌，跟帳號頁一樣 */
+  #app-root { max-width: 1500px; margin: 0 auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .glass-card { background: rgba(255,255,255,.98); border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 3px 0 rgb(0 0 0 / .1); }
+
+  /* ===== 頁首 ===== */
+  header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 10px 24px; }
+  #btnHome { justify-self: start; display: inline-flex; align-items: center; gap: 4px; padding: 8px 12px; border-radius: 8px; background: #0f172a; color: #facc15; font-size: 12px; font-weight: 900; text-decoration: none; white-space: nowrap; }
+  #btnHome:hover { background: #1e293b; }
+  .head-mid { text-align: center; min-width: 0; }
+  header h1 { margin: 0; font-size: 32px; line-height: 1.15; font-weight: 900; color: #1e293b; letter-spacing: -.8px; }
+  header h1 span { margin-left: 8px; font-size: 22px; font-weight: 700; color: #94a3b8; letter-spacing: 0; }
+  .head-meta { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .head-meta .brand { font-size: 12px; font-weight: 700; color: #94a3b8; letter-spacing: 2px; }
+  #liveTag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 999px; background: #ecfdf5; color: #059669; font-size: 10px; font-weight: 700; }
+  #liveTag i { width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
+  #liveTag.live { animation: pulse-soft 2s infinite; }
+  #liveTag.closed { background: #f1f5f9; color: #94a3b8; animation: none; }
+  #liveTag.closed i { background: #cbd5e1; }
+  @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+  #btnCopy { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 10px; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; color: #2563eb; font-size: 11px; font-weight: 700; }
+  #btnCopy:hover { background: #dbeafe; }
+  #reloadBox { justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  #lastLoad { font-size: 10px; font-weight: 700; color: #94a3b8; font-variant-numeric: tabular-nums; }
+  #btnReload { padding: 8px 12px; border: 0; border-radius: 8px; background: #1e293b; color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  #btnReload:hover { background: #0f172a; }
+  #btnReload:active { transform: scale(.95); }
+  #countdown { display: inline-block; min-width: 30px; margin-left: 4px; padding: 0 4px; border-radius: 5px; background: rgba(255,255,255,.16); font-size: 11px; font-variant-numeric: tabular-nums; }
   #countdown.off { opacity: .5; }
-  #lastLoad { font-size: 11px; color: #64748b; font-variant-numeric: tabular-nums; }
-  .btn:hover { filter: brightness(1.15); }
-  .btn.pivot { background: #fff; color: #334155; box-shadow: inset 0 0 0 1.5px #94a3b8; }
-  .btn.pivot.on { background: #334155; color: #fff; box-shadow: none; }
-  .btn.erase { background: #fff; color: #b91c1c; box-shadow: inset 0 0 0 1.5px #ef4444; }
-  .btn.erase.on { background: #dc2626; color: #fff; box-shadow: none; }
-  #eraseBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; font-weight: 700; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 9px; padding: 6px 10px; margin: 2px 0 8px; }
+
+  /* ===== 第 1 頁：盤別鈕、選線鈕（含即時數字）、圖表 ===== */
+  #main { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  /* 盤別區高度固定：放得下就平分整排；放不下時一次顯示整數張、其他左右捲，「全部」固定在最右邊（寬度由 fitSessions 算） */
+  #session-row { position: relative; padding: 5px; }
+  #sessions { --smin: 156; position: relative; display: flex; gap: 4px; height: 72px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  #sessions::-webkit-scrollbar { display: none; }
+  #sessions .sess { flex: 0 0 var(--sw, 156px); height: 100%; scroll-snap-align: start; overflow: hidden; }
+  #sessions .sess[data-i="-1"] { position: sticky; right: 0; z-index: 2; scroll-snap-align: none; }
+  #sessions.over .sess[data-i="-1"] { box-shadow: -5px 0 6px -3px rgba(15,23,42,.18); }
+  .sessArrow { position: absolute; top: 50%; z-index: 3; width: 24px; height: 44px; margin-top: -22px; padding: 0; border: 0; border-radius: 8px; background: rgba(15,23,42,.72); color: #fff; font-size: 18px; font-weight: 900; line-height: 1; }
+  .sessArrow:hover { background: #0f172a; }
+  #sessPrev { left: 8px; }
+  #sessNext { right: calc(var(--sw, 156px) + 12px); }
+  .sess { display: flex; flex-flow: row wrap; align-items: baseline; align-content: center; justify-content: center; column-gap: 5px; row-gap: 1px; min-width: 0; padding: 4px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; color: #64748b; font-size: 11px; font-weight: 800; line-height: 1.25; user-select: none; }
+  .sess:hover { border-color: #94a3b8; }
+  .sess small { font-size: 9px; font-weight: 700; color: #94a3b8; }
+  .sess .pnl, .sess .vol { flex: 0 0 100%; text-align: center; white-space: nowrap; }
+  .sess .pnl { font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .sess .pnl.up { color: #dc2626; } .sess .pnl.dn { color: #059669; }
+  .sess .vol { display: block; width: 100%; padding: 2px; border-top: 1px dashed #e2e8f0; font-size: 9px; font-weight: 600; line-height: 1.35; color: #64748b; font-variant-numeric: tabular-nums; }
+  .sess .vol b { margin-right: 3px; }
+  .sess .vol span { display: inline-block; margin: 0 2px; }
+  .sess .vol .up { color: #dc2626; } .sess .vol .dn { color: #059669; }
+  .sess .vol.img { cursor: zoom-in; }
+  .sess .vol.img:hover { background: #eff6ff; }
+  .sess .vol .see { color: #2563eb; }
+  .sess.on { background: #f97316; color: #fff; border-color: #ea580c; }
+  .sess.night.on { background: #1e293b; border-color: #0f172a; }
+  .sess.on small, .sess.on .pnl, .sess.on .pnl.up, .sess.on .pnl.dn, .sess.on .vol, .sess.on .vol .up, .sess.on .vol .dn, .sess.on .vol .see { color: #fff; }
+  .sess.on .vol { border-top-color: rgba(255,255,255,.4); }
+  .sess.on .vol.img:hover { background: rgba(255,255,255,.15); }
+
+  #chartCard { padding: 8px 16px 6px; display: flex; flex-direction: column; min-height: 0; }
+  /* 選線鈕一排：寬度不夠時由 fitChips 一級一級收窄（snug → tight → tighter → tightest），還不夠才左右捲 */
+  #chips { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; overflow-x: auto; scrollbar-width: none; }
+  #chips::-webkit-scrollbar { display: none; }
+  #chips .hint { flex: 0 0 auto; margin-left: auto; font-size: 10px; font-weight: 900; color: #94a3b8; }
+  #chips .chip { flex: 0 0 auto; white-space: nowrap; user-select: none; }
+  #chips .chip:last-child { margin-right: auto; }
+  #chips .chip.dragging { opacity: .75; box-shadow: 0 4px 10px rgba(15,23,42,.3); transform: none; }
+  #chips.sorting, #chips.sorting .chip { cursor: grabbing; }
+  #chips.snug .hint { display: none; }
+  #chips.snug .chip { padding: 3px 7px; gap: 4px; }
+  #chips.snug { gap: 4px; }
+  #chips.tight .chip small { display: none; }
+  #chips.tighter .chip b { font-size: 13px; }
+  #chips.tightest { gap: 2px; }
+  #chips.tightest .chip { padding: 2px 4px; gap: 2px; font-size: 9.5px; border-width: 1.5px; }
+  #chips.tightest .chip::before { width: 8px; height: 8px; }
+  #chips.tightest .chip b { font-size: 11px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 2px solid #e2e8f0; border-radius: 999px; background: #fff; color: #94a3b8; font-size: 11px; font-weight: 900; }
+  .chip::before { content: ''; width: 10px; height: 10px; border: 2px solid var(--c); border-radius: 50%; }
+  .chip:hover { border-color: #94a3b8; }
+  .chip:active { transform: scale(.95); }
+  .chip.on { background: var(--c); border-color: var(--c); color: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .1); }
+  .chip.on::before { background: #fff; border-color: #fff; }
+  .chip b { font-family: Arial, sans-serif; font-size: 15px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .chip small { font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; opacity: .85; font-variant-numeric: tabular-nums; }
+  .chip b:empty, .chip small:empty { display: none; }
+  #toolRow { display: flex; gap: 4px 8px; flex-wrap: wrap; align-items: center; justify-content: center; margin-bottom: 4px; }
+  .btn { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border: 1.5px solid #e2e8f0; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 900; white-space: nowrap; }
+  .btn:hover { background: #e2e8f0; }
+  .btn:active { transform: scale(.95); }
+  .btn.pivot.on { background: #334155; border-color: #334155; color: #fff; }
+  .btn.erase { background: #fff; border-color: #f9a8d4; color: #db2777; }
+  .btn.erase:hover { border-color: #ec4899; }
+  .btn.erase.on { background: #db2777; border-color: #db2777; color: #fff; }
+  #lowBar { font-size: 11px; font-weight: 700; color: #94a3b8; }
+  #lowBar input[type=number] { width: 50px; padding: 1px 4px; margin: 0 2px; border: 1.5px solid #e2e8f0; border-radius: 6px; font: inherit; color: #475569; text-align: center; }
+  #lowBar input[type=color] { width: 24px; height: 20px; padding: 0 1px; border: 1px solid #e2e8f0; border-radius: 5px; vertical-align: middle; background: #fff; cursor: pointer; }
+  #zReset { margin-left: 4px; padding: 1px 8px; border: 0; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 900; }
+  #zReset:hover { background: #e2e8f0; }
+  #eraseBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; padding: 6px 10px; border: 1px solid #fbcfe8; border-radius: 9px; background: #fdf2f8; color: #be185d; font-size: 11px; font-weight: 700; }
   #eraseBar .grow { flex: 1; min-width: 220px; }
-  #eraseBar button { border: 1px solid #fca5a5; background: #fff; color: #b91c1c; border-radius: 7px; padding: 3px 10px; font-size: 12px; font-weight: 700; }
-  #eraseBar button:hover { background: #fee2e2; }
-  #stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin: 6px 0; }
-  .stat { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; column-gap: 8px; padding: 4px 10px; border-left: 5px solid var(--c); border-radius: 12px; text-align: center; }   /* 一行：名稱 數值 區間 低高 */
-  .stat .k { font-size: 10px; color: #64748b; font-weight: 800; letter-spacing: .5px; }
-  .stat .v { font-size: 18px; font-weight: 900; color: var(--c); margin: 0; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
-  .stat .d { font-size: 11px; font-weight: 800; }
-  .stat .r { font-size: 10px; color: #94a3b8; }
-  .up { color: #059669; } .down { color: #dc2626; } .flat { color: #94a3b8; }
-  #sessions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; padding: 6px; background: #fff; border: 1px solid #e8edf3; border-radius: 18px; box-shadow: 0 2px 10px rgba(15,23,42,.06); }
-  .sess { flex: 1; min-width: 110px; padding: 5px 6px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; font-size: 12px; font-weight: 900; color: #334155; line-height: 1.35; }
-  .sess.night { background: #f8fafc; }
-  .sess small { display: block; margin-top: 0; font-size: 10px; font-weight: 600; opacity: .65; }
-  .sess .vol { display: block; margin: 2px 2px 0; padding: 1px 4px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; font-size: 10px; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; }
-  .sess .vol span, .sess .vol b { display: inline-block; margin: 0 3px; }
-  .sess .vol .up { color: #dc2626; }
-  .sess .vol .dn { color: #16a34a; }
-  .sess.on .vol { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.25); }
-  .sess.on .vol .up { color: #fca5a5; }
-  .sess.on .vol .dn { color: #86efac; }
-  .sess.on { background: #f97316; color: #fff; border-color: #f97316; box-shadow: 0 4px 12px rgba(249,115,22,.35); }
-  #chartCard { padding: 8px 12px 4px; }
-  #chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: center; margin-bottom: 4px; }
-  #chips .hint { font-size: 12px; color: #94a3b8; font-weight: 800; margin-right: 4px; }
-  .chip { border: 2px solid #e2e8f0; color: #64748b; background: #fff; border-radius: 999px; padding: 4px 13px; font-size: 12px; font-weight: 900; }
-  .chip::before { content: '○'; color: var(--c); margin-right: 6px; font-weight: 900; }
-  .chip:hover { border-color: var(--c); }
-  .chip.on { background: var(--c); border-color: var(--c); color: #fff; box-shadow: 0 3px 10px rgba(15,23,42,.15); }
-  .chip.on::before { content: '●'; color: #fff; }
-  #lowBar { font-size: 11px; font-weight: 700; color: #b45309; margin: 0 0 4px; text-align: center; }
-  .zoneOpt input[type=number] { width: 58px; padding: 3px 6px; margin: 0 2px; border: 1.5px solid #f59e0b; border-radius: 7px; font: inherit; text-align: center; color: #b45309; }
-  .zoneOpt input[type=color] { width: 30px; height: 24px; padding: 0 2px; border: 1px solid #e2e8f0; border-radius: 6px; vertical-align: middle; background: #fff; cursor: pointer; }
-  .zoneOpt button { border: 1px solid #fcd34d; background: #fff; color: #b45309; border-radius: 7px; padding: 2px 9px; font-size: 12px; font-weight: 700; margin-left: 4px; }
-  #zoneCard { margin: 12px 0 0; padding: 10px 14px; }
-  #zoneCard .zt { font-size: 13px; font-weight: 900; color: #0f172a; margin-bottom: 6px; }
-  #zoneCard .zt span { font-size: 11px; font-weight: 700; color: #94a3b8; margin-left: 8px; }
-  #zoneCard table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-  #zoneCard th { text-align: right; font-size: 12px; color: #64748b; padding: 5px 8px; border-bottom: 1.5px solid #e2e8f0; white-space: nowrap; }
-  #zoneCard th:first-child, #zoneCard td:first-child { text-align: left; }
-  #zoneCard th i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
-  #zoneCard td { text-align: right; padding: 5px 8px; border-bottom: 1px solid #f1f5f9; font-weight: 700; white-space: nowrap; }
-  #zoneCard td small { font-weight: 700; color: #94a3b8; }
-  #zoneCard tbody tr { cursor: pointer; }
-  #zoneCard tbody tr:hover { background: #f8fafc; }
-  #zoneCard tr.sum td { border-top: 1.5px solid #e2e8f0; background: #f8fafc; }
-  #lowN { width: 62px; padding: 3px 6px; margin: 0 4px; border: 1.5px solid #f59e0b; border-radius: 7px; font: inherit; text-align: center; color: #b45309; }
-  #wrap { position: relative; height: 560px; min-height: 360px; }
+  #eraseBar button { padding: 3px 10px; border: 0; border-radius: 999px; background: #fff; color: #be185d; font-size: 11px; font-weight: 900; }
+  #eraseBar button:hover { background: #fce7f3; }
+  #wrap { position: relative; height: 560px; min-height: 360px; flex: 0 0 auto; }
+  #cvScale { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 0 0; }
   #cv { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
   #tip { position: absolute; pointer-events: none; display: none; background: rgba(15,23,42,.93); color: #fff; border-radius: 9px; padding: 8px 11px; font-size: 12px; line-height: 1.6; white-space: nowrap; z-index: 5; }
   #tip b { display: block; margin-bottom: 2px; }
   #tip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
   #tip span { float: right; margin-left: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  #drop { padding: 70px 20px; text-align: center; border: 2.5px dashed #94a3b8; background: #fff; border-radius: 14px; margin-top: 12px; color: #475569; cursor: pointer; }
+  #drop { padding: 70px 20px; text-align: center; border: 2px dashed #cbd5e1; background: #fff; border-radius: 12px; color: #64748b; font-size: 13px; font-weight: 700; cursor: pointer; }
   #drop.over, body.over #drop { border-color: #2563eb; background: #eff6ff; }
-  #drop .big { font-size: 22px; font-weight: 900; margin-bottom: 8px; color: #0f172a; }
+  #drop .big { font-size: 22px; font-weight: 900; margin-bottom: 8px; color: #1e293b; }
   #msg { color: #dc2626; font-weight: 700; font-size: 13px; margin-top: 10px; min-height: 18px; }
-  .foot { font-size: 11px; color: #94a3b8; text-align: center; padding: 8px 0 2px; }
-  #volCard { margin: 12px 0 0; padding: 10px 14px; }
-  #volCard .zt { font-size: 13px; font-weight: 900; color: #0f172a; margin-bottom: 6px; }
-  #volCard .zt span { font-size: 11px; font-weight: 700; color: #94a3b8; margin-left: 8px; }
-  #volCard .tblWrap { overflow-x: auto; }
-  #volCard table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
-  #volCard th { text-align: left; font-size: 12px; color: #64748b; padding: 7px 10px; border-bottom: 1.5px solid #e2e8f0; white-space: nowrap; }
-  #volCard td { padding: 7px 10px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
-  #volCard td.vu { color: #dc2626; font-weight: 700; }
-  #volCard td.vd { color: #16a34a; font-weight: 700; }
-  #volCard td.ext { font-weight: 900; }
-  #volCard td .sina { font-size: 11px; color: #7c3aed; font-weight: 700; margin-left: 6px; }
-  #volCard tr.last td { font-weight: 900; background: #f8fafc; }
-  #dailyCard { margin: 12px 0 0; padding: 10px 14px; }
-  #dailyCard .zt { font-size: 13px; font-weight: 900; color: #0f172a; margin-bottom: 6px; }
-  #dailyCard .zt span { font-size: 11px; font-weight: 700; color: #94a3b8; margin-left: 8px; }
-  #dailyCard .tblWrap { overflow-x: auto; }
-  #dailyCard table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-  #dailyCard th { text-align: right; font-size: 12px; color: #64748b; padding: 6px 8px; border-bottom: 1.5px solid #e2e8f0; white-space: nowrap; }
-  #dailyCard td { text-align: right; padding: 6px 8px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
-  #dailyCard th:nth-child(-n+2), #dailyCard td:nth-child(-n+2) { text-align: left; }
-  #dailyCard td.pu { color: #dc2626; font-weight: 800; } #dailyCard td.pd { color: #16a34a; font-weight: 800; }
-  #dailyCard td.mhi { color: #dc2626; font-weight: 800; }
-  #dailyCard td small { color: #94a3b8; font-weight: 600; margin-left: 4px; }
-  #dailyCard tr.best td:nth-child(9)::after { content: ' 最佳'; font-size: 10px; color: #94a3b8; }
-  #dailyCard tr.worst td:nth-child(9)::after { content: ' 最差'; font-size: 10px; color: #94a3b8; }
-  #dailyCard tr.sum td { border-top: 1.5px solid #e2e8f0; background: #f8fafc; font-weight: 900; }
-  #dailyCard tr.live td { background: #fefce8; font-weight: 800; border-top: 1.5px dashed #facc15; }
-  #dailyCard .note { font-size: 11px; color: #94a3b8; line-height: 1.6; margin-top: 6px; }
-  .sess .vol.img { cursor: zoom-in; border-style: dashed; border-color: #93c5fd; }
-  .sess .vol.img:hover { background: #eff6ff; }
-  .sess .vol .see { font-size: 10px; color: #2563eb; }
-  .sess.on .vol .see { color: #bfdbfe; }
+
+  /* ===== 第 2 頁：表格（深色表頭、黃字標題，跟每盤績效表一樣） ===== */
+  #page-tables { display: flex; flex-direction: column; gap: 10px; }
+  .sheet { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1); overflow: hidden; }
+  .sheet-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 16px; background: #0f172a; }
+  .sheet-head h2 { margin: 0; font-size: 16px; font-weight: 900; color: #facc15; letter-spacing: -.2px; }
+  .sheet-head h2 em { font-style: normal; color: #fff; }
+  .sheet-head span { font-size: 11px; font-weight: 700; color: #94a3b8; }
+  .tblWrap { overflow-x: auto; }
+  .sheet table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .sheet th { padding: 9px 8px; background: #1e293b; color: #cbd5e1; border: 1px solid #334155; font-size: 11px; font-weight: 900; white-space: nowrap; text-align: center; }
+  .sheet th i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .sheet td { padding: 8px; border: 1px solid #e2e8f0; font-weight: 700; color: #334155; text-align: right; white-space: nowrap; }
+  .sheet td:first-child { text-align: left; font-weight: 900; color: #475569; }
+  .sheet td small { margin-left: 4px; font-size: 10px; font-weight: 700; color: #94a3b8; }
+  .sheet tbody tr:hover td { background: #f8fafc; }
+  .sheet tr.sum td { background: #f8fafc; font-weight: 900; }
+  .sheet .note { margin: 0; padding: 8px 16px; font-size: 10px; font-weight: 700; line-height: 1.7; color: #94a3b8; }
+  .sheet .note + .note { padding-top: 0; }
+  .sheet td.pu, .sheet td.vu, .sheet td.mhi { color: #dc2626; font-weight: 900; }
+  .sheet td.pd, .sheet td.vd { color: #059669; font-weight: 900; }
+  #volCard td:nth-child(2), #volCard td:nth-child(3), #dailyCard td:nth-child(2) { text-align: center; }
+  #volCard td.ext { font-weight: 900; color: #0f172a; }
+  #volCard td .sina { margin-left: 6px; font-size: 11px; color: #7c3aed; font-weight: 700; }
+  #volCard td .see { margin-left: 6px; font-size: 11px; color: #2563eb; font-weight: 700; }
   #volCard tr.img { cursor: zoom-in; }
   #volCard tr.img:hover td { background: #eff6ff; }
-  #volCard td .see { font-size: 11px; color: #2563eb; font-weight: 700; margin-left: 6px; }
-  #imgModal { position: fixed; inset: 0; z-index: 50; background: rgba(15,23,42,.72); display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; }
-  #imgModal .box { background: #fff; border-radius: 12px; padding: 10px 12px 12px; max-width: min(1200px, 96vw); max-height: 94vh; display: flex; flex-direction: column; gap: 8px; cursor: default; }
+  #volCard tr.last td { background: #f8fafc; font-weight: 900; }
+  #dailyCard tr.best td:nth-child(9)::after { content: ' 最佳'; font-size: 10px; color: #94a3b8; }
+  #dailyCard tr.worst td:nth-child(9)::after { content: ' 最差'; font-size: 10px; color: #94a3b8; }
+  #dailyCard tr.live td { background: #fefce8; font-weight: 800; }
+  #zoneCard tbody tr { cursor: pointer; }
+  #page-btn { display: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+
+  /* ===== 分時圖視窗 ===== */
+  .sess .vol.img .see { font-size: 9px; }
+  #imgModal { position: fixed; inset: 0; z-index: 70; background: rgba(15,23,42,.72); display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; }
+  #imgModal .box { background: #fff; border-radius: 12px; padding: 12px; max-width: min(1200px, 96vw); max-height: 94vh; display: flex; flex-direction: column; gap: 8px; cursor: default; }
   #imgModal .head { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 900; }
   #imgModal .head .grow { flex: 1; }
-  #imgModal .head button { border: 1px solid #e2e8f0; background: #fff; border-radius: 7px; padding: 3px 10px; font-size: 13px; font-weight: 700; color: #334155; }
+  #imgModal .head button { border: 0; background: #1e293b; color: #fff; border-radius: 8px; padding: 5px 12px; font-size: 12px; font-weight: 700; }
   #imgModal img { display: block; max-width: 100%; max-height: calc(94vh - 170px); object-fit: contain; }
   #imgPnl { overflow-x: auto; }
   #imgPnl table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -132,104 +209,225 @@
   #imgPnl th:first-child, #imgPnl td:first-child { text-align: left; }
   #imgPnl td small { font-weight: 600; color: #94a3b8; margin-left: 4px; }
   #imgPnl tr.sum td { background: #f8fafc; border-top: 1.5px solid #e2e8f0; }
-  #imgPnl .up { color: #dc2626; } #imgPnl .dn { color: #16a34a; }
+  #imgPnl .up { color: #dc2626; } #imgPnl .dn { color: #059669; }
   #imgPnl .acct { font-size: 14px; font-weight: 800; padding: 6px 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
   #imgPnl .acct small { display: block; font-size: 11px; font-weight: 600; color: #64748b; margin-top: 2px; }
   #imgPnl .ref { font-size: 12px; font-weight: 700; color: #94a3b8; margin: 8px 0 2px; }
-  .sess .pnl { display: block; margin: 4px 4px 0; padding: 3px 6px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .sess .pnl.up { color: #dc2626; } .sess .pnl.dn { color: #16a34a; }
-  .sess.on .pnl { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.25); }
-  .sess.on .pnl.up { color: #fca5a5; } .sess.on .pnl.dn { color: #86efac; }
-  #volCard td.pu { color: #dc2626; font-weight: 800; } #volCard td.pd { color: #16a34a; font-weight: 800; }
-  #sinaCard { margin: 12px 0 0; padding: 10px 14px; }
-  #sinaCard .zt { font-size: 13px; font-weight: 900; color: #0f172a; margin-bottom: 4px; }
-  #sinaCard .zt span { font-size: 11px; font-weight: 700; color: #94a3b8; margin-left: 8px; }
-  #sinaDays { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 6px; }
-  #sinaDays button { border: 1px solid #e2e8f0; background: #fff; border-radius: 7px; padding: 2px 10px; font-size: 12px; font-weight: 700; color: #475569; }
-  #sinaDays button.on { background: #1e293b; border-color: #1e293b; color: #fff; }
-  #sinaNow { font-size: 13px; font-weight: 700; color: #475569; font-variant-numeric: tabular-nums; margin-bottom: 4px; }
-  #sinaNow b { font-size: 22px; font-weight: 900; color: #7c3aed; margin-right: 8px; }
-  #sinaNow .up { color: #dc2626; } #sinaNow .dn { color: #16a34a; }
+  /* 新浪小圖目前不顯示，資料仍每分鐘讀取 */
   #sinaSvg { width: 100%; height: 230px; display: block; touch-action: none; cursor: crosshair; }
-  #sinaCard .note { font-size: 11px; color: #94a3b8; line-height: 1.6; margin-top: 6px; }
-  #sinaCard .empty { font-size: 13px; color: #b45309; font-weight: 700; padding: 10px 0; }
-  .hidden { display: none !important; }
+
+  /* 打橫提示只在手機直向出現 */
+  #rotate-hint { display: none; }
+
+  /* ===== 電腦與手機橫向：分兩頁，第 1 頁數字 + 走勢圖、第 2 頁表格；手機直向整份一頁 ===== */
+  html:not(.m-portrait) #page-tables { display: none; }
+  html:not(.m-portrait) body.m-page-2 #app-root > *:not(header) { display: none !important; }
+  html:not(.m-portrait) body.m-page-2 #app-root > #page-tables { display: flex !important; }
+  html:not(.m-portrait) body.m-page-2 #app-root { padding-bottom: 72px; }
+  /* 換頁鈕放右下角並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
+  html:not(.m-portrait) #page-btn { display: inline-flex; align-items: center; justify-content: center; position: fixed; z-index: 60;
+    right: max(10px, env(safe-area-inset-right)); bottom: calc(max(6px, env(safe-area-inset-bottom)) + 8px);
+    min-width: 108px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: #1e293b; color: #fff; font-size: 14px; font-weight: 900; white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(15,23,42,.35); cursor: pointer; }
+  #page-btn:hover { background: #334155; }
+  #page-btn:active { background: #2563eb; transform: scale(.96); }
+
+  @media (max-width: 767px) {
+    header { display: flex; flex-direction: column; padding: 12px; }
+    #btnHome { align-self: flex-start; }
+    #reloadBox { flex-direction: row; align-items: center; align-self: center; }
+    header h1 { font-size: 26px; }
+    header h1 span { font-size: 18px; }
+    #app-root { padding: 6px 6px 64px; gap: 8px; }   /* 底部留給換頁鈕，捲到底才不會蓋住拉桿 */
+    #main { gap: 8px; }
+    #chartCard { padding: 8px; }
+  }
+
+  /* ===== 手機直向：整份一頁（用電腦版寬 1040 排好再縮到螢幕寬），圖表撐滿剩餘高度，字放大 ===== */
+  html.m-portrait #app-root { max-width: none; min-height: 100vh; min-height: 100svh; padding: 6px; }
+  html.m-portrait #app-root > * { flex: 0 0 auto; }
+  html.m-portrait #app-root > #main { flex: 1 1 auto; }
+  html.m-portrait #chartCard { flex: 1 1 auto; }
+  html.m-portrait #wrap { flex: 1 1 auto; height: auto !important; min-height: 640px; }
+  html.m-portrait #cvScale { width: 62.5%; height: 62.5%; transform: scale(1.6); }   /* 圖上的字跟著放大 1.6 倍 */
+  html.m-portrait #rotate-hint { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 10px 16px; border-radius: 14px;
+    background: #fef3c7; border: 3px solid #f59e0b; color: #92400e; font-size: 38px; font-weight: 900; line-height: 1.15; }
+  html.m-portrait .rotate-hint-icon { width: 46px; height: 46px; transform: rotate(90deg); flex: none; }
+  html.m-portrait header h1 { font-size: 48px; }
+  html.m-portrait header h1 span { font-size: 32px; }
+  html.m-portrait #sessions { --smin: 190; height: 108px; }
+  html.m-portrait .sessArrow { display: none; }
+  html.m-portrait .sess { font-size: 20px; }
+  html.m-portrait .sess small { font-size: 15px; }
+  html.m-portrait .sess .pnl { font-size: 17px; }
+  html.m-portrait .sess .vol, html.m-portrait .sess .vol.img .see { font-size: 14px; }
+  html.m-portrait .chip { font-size: 18px; padding: 7px 14px; }
+  html.m-portrait .chip b { font-size: 26px; }
+  html.m-portrait .chip small { display: inline; font-size: 15px; }
+  html.m-portrait .chip small:empty { display: none; }
+  html.m-portrait #chips { flex-wrap: wrap; justify-content: center; gap: 6px; overflow: visible; }
+  html.m-portrait #chips .hint { font-size: 15px; }
+  html.m-portrait .btn, html.m-portrait #lowBar, html.m-portrait #zReset { font-size: 16px; }
+  html.m-portrait .sheet-head h2 { font-size: 24px; }
+  html.m-portrait .sheet-head span { font-size: 15px; }
+  html.m-portrait .sheet th { padding: 6px 2px; font-size: 14px; line-height: 1.15; white-space: normal; }
+  html.m-portrait .sheet td { padding: 6px 3px; font-size: 15px; line-height: 1.2; }
+  html.m-portrait .sheet td small { font-size: 12px; }
+  html.m-portrait .sheet .note { font-size: 14px; }
+
+  /* ===== 手機橫向（打橫）：版面固定貼齊可視範圍 ===== */
+  @media (orientation: landscape) and (max-height: 600px) {
+    html, body { height: 100%; overflow: hidden !important; }
+    /* 固定貼齊實際可視範圍的最上方（iPhone 轉橫向時頁面可能被往下推）；左右只讓開瀏海 */
+    #app-root { position: fixed !important; top: calc(var(--vv-top, 0px) + 2px);
+      left: max(3px, env(safe-area-inset-left)); right: max(3px, env(safe-area-inset-right));
+      height: calc(var(--vv-h, 100vh) - 4px); max-width: none; margin: 0; padding: 0; gap: 2px; overflow: hidden; }
+    #app-root > * { flex: 0 0 auto; }
+    #app-root > #main { flex: 1 1 auto; gap: 2px; }
+
+    /* 頁首：壓成一行 */
+    header { display: flex; flex-direction: row; align-items: center; justify-content: center; padding: 1px 8px; gap: 8px; }
+    .head-mid { display: flex; align-items: center; justify-content: center; gap: 8px; }
+    header h1 { font-size: 14px; line-height: 1.1; white-space: nowrap; letter-spacing: 0; }
+    header h1 span { font-size: 10px; margin-left: 4px; }
+    .head-meta { margin: 0; flex-wrap: nowrap; min-width: 0; }
+    .head-meta .brand, #btnCopy { display: none; }
+    #reloadBox { position: absolute; right: 8px; flex-direction: row; align-items: center; }
+
+
+    /* 盤別鈕一整排可左右滑：只留日期和損益 */
+    #session-row { padding: 1px; }
+    #sessions { --smin: 84; gap: 2px; height: 26px; }
+    .sessArrow { display: none; }
+    .sess { padding: 1px; gap: 0; font-size: 10px; line-height: 1.1; border-radius: 5px; white-space: nowrap; }
+    .sess small, .sess .vol { display: none; }
+    .sess .pnl { font-size: 8px; }
+    .sess.on { transform: none; box-shadow: none; }
+
+    /* 圖表卡：撐滿剩餘高度；選線鈕擠成一行，其他工具收起來 */
+    #chartCard { flex: 1 1 auto; padding: 2px; }
+    #chips { flex: 0 0 auto; gap: 3px; margin: 0; }
+    #chips .hint, #toolRow, #eraseBar { display: none !important; }
+    .chip { flex: 0 0 auto; min-height: 24px; padding: 0 7px; font-size: 10px; white-space: nowrap; border-width: 1.5px; gap: 3px; }
+    .chip::before { width: 8px; height: 8px; }
+    .chip b { font-size: 12px; }
+    .chip small { display: none; }
+    #wrap { flex: 1 1 auto; height: auto !important; min-height: 0; }
+
+    /* 第 2 頁：表格撐滿寬度 */
+    body.m-page-2 #app-root { overflow-y: auto; padding-bottom: 64px; }
+    .sheet-head { padding: 2px 8px; }
+    .sheet-head h2 { font-size: 12px; white-space: nowrap; }
+    .sheet-head span { font-size: 9.5px; }
+    .sheet th { padding: 2px; font-size: 9.5px; line-height: 1.1; white-space: normal; }
+    .sheet td { padding: 2px 3px; font-size: 11px; line-height: 1.15; }
+    .sheet td small { font-size: 8px; }
+    .sheet .note { padding: 3px 8px; }
+
+    /* 操作鈕放最下面並加大：左下回總表；右下同步、換頁；都落在圖表左右的 Y 軸區，不擋拉桿 */
+    #btnHome, #btnReload { display: inline-flex; align-items: center; justify-content: center; position: fixed; z-index: 60;
+      bottom: calc(max(6px, env(safe-area-inset-bottom)) + 8px); min-height: 44px; padding: 0; border-radius: 12px; font-size: 12px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 10px rgba(15,23,42,.35); }
+    #btnHome { left: max(10px, env(safe-area-inset-left)); width: 64px; }
+    #btnReload { right: calc(max(10px, env(safe-area-inset-right)) + 90px); width: 62px; }
+    #btnReload .long, #countdown { display: none; }
+    #lastLoad { font-size: 9px; }
+    html:not(.m-portrait) #page-btn { min-width: 84px; padding: 0 8px; font-size: 12px; }
+  }
 </style>
 </head>
 <body>
-<div id="root">
-  <header class="card">
-    <div class="grow">
-      <h1 id="title">50ETF期權績效表</h1>
-      <div class="sub" id="subtitle">尚未載入檔案 · 資料只在本機瀏覽器處理，不會上傳</div>
+<button id="page-btn" type="button">下一頁 ▶</button>
+<div id="app-root">
+  <header class="glass-card">
+    <a id="btnHome" href="../">← 總表</a>
+    <div class="head-mid">
+      <h1><b id="title" style="font-weight:inherit">50ETF期權績效表</b><span id="fileTag">大陸帳號</span></h1>
+      <div class="head-meta">
+        <span class="brand">歐大的投資報表 · 雙賣平衡</span>
+        <span id="liveTag" class="hidden"><i></i><em id="liveText" style="font-style:normal">LIVE</em></span>
+        <button id="btnCopy" title="複製這個頁面的網址"></button>
+      </div>
     </div>
-    <button class="btn" id="btnOpen">開啟檔案</button>
     <div id="reloadBox">
-      <button class="btn" id="btnReload" title="重新讀取同一個檔案的最新內容（快捷鍵 R）">⟳ 重新載入 <span id="countdown">1:00</span></button>
-      <div id="lastLoad">最新載入：--</div>
+      <span id="lastLoad">更新 --:--:--</span>
+      <button id="btnReload" title="立刻讀取最新資料（快捷鍵 R）">↻ <span class="long">同步數據</span><span id="countdown">1:00</span></button>
     </div>
-    <button class="btn pivot" id="btnPivot" title="標出相對高點▲與相對低點▼（快捷鍵 P）">▲▼ 高低點</button>
-    <button class="btn erase" id="btnErase" title="手動擦掉不合理的數字（快捷鍵 E）">🧽 橡皮擦</button>
-    <button class="btn green" id="btnPng">存成圖片</button>
-    <input type="file" id="file" accept=".csv,.xlsx,.txt" class="hidden">
   </header>
 
+  <div id="rotate-hint">
+    <svg class="rotate-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+    <span>手機打橫看報表，字更大更清楚！</span>
+  </div>
+
   <div id="drop">
-    <div class="big">把 Excel / CSV 檔拖到這裡</div>
+    <div class="big" id="dropTitle">把 Excel / CSV 檔拖到這裡</div>
     <div>或點這裡選擇檔案（支援 .xlsx、.csv，Big5 / UTF-8 自動判斷）</div>
     <div id="msg"></div>
   </div>
 
   <div id="main" class="hidden">
-    <div id="stats"></div>
-    <div id="sessions"></div>
-    <div class="card" id="chartCard">
+    <div id="session-row" class="glass-card"><div id="sessions"></div><button id="sessPrev" class="sessArrow hidden" title="往前">‹</button><button id="sessNext" class="sessArrow hidden" title="往後">›</button></div>
+    <div class="glass-card" id="chartCard">
       <div id="chips"></div>
-      <div id="lowBar" class="hidden">膨脹率的最低值 = 最低
-        <input type="number" id="lowN" min="1" max="999" step="1"> 點的平均
-        <span class="zoneOpt">｜ 膨脹率 ≤ <input type="number" id="zLo" step="0.5"> % 顯示 <input type="color" id="zcLo">
-        　≥ <input type="number" id="zHi" step="0.5"> % 顯示 <input type="color" id="zcHi">
-        <button id="zReset" title="回到 2%／8% 和預設顏色">預設</button></span></div>
+      <div id="toolRow">
+        <div id="lowBar" class="hidden">膨脹率的最低值 = 最低
+          <input type="number" id="lowN" min="1" max="999" step="1"> 點的平均
+          <span class="zoneOpt">｜ 膨脹率 ≤ <input type="number" id="zLo" step="0.5"> % 顯示 <input type="color" id="zcLo">
+          　≥ <input type="number" id="zHi" step="0.5"> % 顯示 <input type="color" id="zcHi">
+          <button id="zReset" title="回到 2%／8% 和預設顏色">預設</button></span></div>
+        <button class="btn pivot" id="btnPivot" title="標出相對高點▲與相對低點▼（快捷鍵 P）">▲▼ 高低點</button>
+        <button class="btn erase" id="btnErase" title="手動擦掉不合理的數字（快捷鍵 E）">🧽 橡皮擦</button>
+        <button class="btn" id="btnPng">存成圖片</button>
+        <button class="btn" id="btnOpen">開啟檔案</button>
+        <input type="file" id="file" accept=".csv,.xlsx,.txt" class="hidden">
+      </div>
       <div id="eraseBar" class="hidden">
         <span class="grow">🧽 橡皮擦：在線上按住滑鼠、拖過不合理的點就會擦掉（只擦最靠近的那一條線）。擦掉的點會記住，重新載入後仍然有效。按 Esc 離開。</span>
         <span id="eraseCount"></span>
         <button id="btnUndo" title="Ctrl+Z">↶ 復原上一步</button>
         <button id="btnEraseAll">全部還原</button>
       </div>
-      <div id="wrap"><canvas id="cv"></canvas><div id="tip"></div></div>
-      <div class="foot">X 軸：拉下方藍色拉桿的左右把手調整範圍、拖中間平移（圖內也可滾輪縮放、拖曳平移）｜ Y 軸：在刻度上往上／下拉調整範圍（上半調上限、下半調下限）、滾輪縮放、雙擊該軸回自動 ｜ 圖內雙擊：全部還原 ｜ 橡皮擦：按 E 開關、Ctrl+Z 復原</div>
+      <div id="wrap"><div id="cvScale"><canvas id="cv"></canvas><div id="tip"></div></div></div>
     </div>
   </div>
 
-  <div class="card hidden" id="sinaCard">   <!-- 新浪波動率已畫在主圖（波動率(新浪) 線），這張小圖不顯示；資料仍每分鐘讀取 -->
-    <div class="zt">即時波動率（新浪）<span id="sinaInfo"></span></div>
+  <div class="hidden" id="sinaCard">   <!-- 新浪波動率已畫在主圖（波動率(新浪) 線），這張小圖不顯示；資料仍每分鐘讀取 -->
+    <div>即時波動率（新浪）<span id="sinaInfo"></span></div>
     <div id="sinaDays"></div>
     <div id="sinaNow"></div>
     <svg id="sinaSvg" viewBox="0 0 720 230" role="img" aria-label="新浪價平隱含波動率分時圖"></svg>
-    <div class="note">資料：新浪免費期權行情，每檔合約的隱含波動率由新浪提供；價平波動率 = 50ETF 現價兩側兩檔履約價的購沽 IV 平均，依距離內插。要先執行 Desktop\cluade\sina_vol\啟動新浪波動率.bat（盤中每分鐘記錄一次，頁面每分鐘自動更新）。新浪的數字和看盤軟體的滬50ETF波指算法不同，會有些微差距。</div>
   </div>
 
-  <div class="card" id="volCard">
-    <div class="zt">上證50ETF波指 每日開高低收<span id="volRange"></span></div>
-    <div class="tblWrap">
-      <table><thead><tr><th>日期</th><th>星期</th><th>漲跌</th><th>最高</th><th>最低</th><th>開盤（約）</th><th>收盤（約）</th><th>當日淨損益（帳戶）</th><th>獲利%</th></tr></thead>
-        <tbody id="volBody"></tbody></table>
-    </div>
-  </div>
+  <div id="page-tables">
+    <section class="sheet" id="dailyCard">
+      <div class="sheet-head"><h2>每日損益表<em>（實單）</em></h2><span id="dailyRange"></span></div>
+      <div class="tblWrap">
+        <table><thead><tr><th>日期</th><th>星期</th><th>成交筆數</th><th>賣／買口數</th><th>最大保證金</th><th>保證金使用%</th><th>權利金淨收</th><th>手續費</th><th>淨損益</th><th>日初資金</th><th>報酬率</th></tr></thead>
+          <tbody id="dailyBody"></tbody></table>
+      </div>
+      <p class="note" id="dailyNote"></p>
+    </section>
 
-  <div class="card" id="dailyCard">
-    <div class="zt">每日損益表（實單）<span id="dailyRange"></span></div>
-    <div class="tblWrap">
-      <table><thead><tr><th>日期</th><th>星期</th><th>成交筆數</th><th>賣／買口數</th><th>最大保證金</th><th>保證金使用%</th><th>權利金淨收</th><th>手續費</th><th>淨損益</th><th>日初資金</th><th>報酬率</th></tr></thead>
-        <tbody id="dailyBody"></tbody></table>
-    </div>
-    <div class="note" id="dailyNote"></div>
-  </div>
+    <section class="sheet" id="volCard">
+      <div class="sheet-head"><h2>上證50ETF波指<em>（每日開高低收）</em></h2><span id="volRange"></span></div>
+      <div class="tblWrap">
+        <table><thead><tr><th>日期</th><th>星期</th><th>漲跌</th><th>最高</th><th>最低</th><th>開盤（約）</th><th>收盤（約）</th><th>當日淨損益（帳戶）</th><th>獲利%</th></tr></thead>
+          <tbody id="volBody"></tbody></table>
+      </div>
+    </section>
 
-  <div class="card hidden" id="zoneCard">
-    <div class="zt">時價膨脹率 各區間停留時間（每盤）<span>點一列可跳到該盤</span></div>
-    <table><thead><tr><th>盤別</th><th>總時間</th><th id="zoneHead"></th><th id="zoneHead2"></th><th id="zoneHead3"></th></tr></thead>
-      <tbody id="zoneBody"></tbody></table>
+    <section class="sheet hidden" id="zoneCard">
+      <div class="sheet-head"><h2>時價膨脹率<em>（各區間停留時間）</em></h2><span>點一列可切換圖表到該盤</span></div>
+      <div class="tblWrap">
+        <table><thead><tr><th>盤別</th><th>總時間</th><th id="zoneHead"></th><th id="zoneHead2"></th><th id="zoneHead3"></th></tr></thead>
+          <tbody id="zoneBody"></tbody></table>
+      </div>
+    </section>
+
+    <section class="sheet">
+      <p class="note" id="subtitle">尚未載入檔案 · 資料只在本機瀏覽器處理，不會上傳</p>
+      <p class="note">選線鈕可以用滑鼠左右拖曳排順序 ｜ 盤別區放不下時，用滾輪或箭頭左右捲 ｜ 圖表操作　X 軸：拉下方藍色拉桿的左右把手調整範圍、拖中間平移（圖內也可滾輪縮放、拖曳平移）｜ Y 軸：在刻度上往上／下拉調整範圍（上半調上限、下半調下限）、滾輪縮放、雙擊該軸回自動 ｜ 圖內雙擊：全部還原 ｜ 橡皮擦：按 E 開關、Ctrl+Z 復原</p>
+    </section>
   </div>
 </div>
 
@@ -253,6 +451,58 @@ window.VOL_IMG_DATA = {
 </script>
 <script>
 'use strict';
+// 可拖曳的換頁鈕（跟 common.js 的 makeDraggable 相同，位置記在同一個 key，所以跟帳號頁停在同一個地方）
+const makeDraggable = (selector, key) => {
+  const storeKey = `ir-drag:${key}`, rule = document.head.appendChild(document.createElement('style'));
+  let pos = null;   // x、y：按鈕中心在可視範圍的比例；w、h：按鈕大小
+  try { pos = JSON.parse(localStorage.getItem(storeKey)); } catch (e) {}
+  const area = () => { const v = window.visualViewport; return v ? { l: v.offsetLeft, t: v.offsetTop, w: v.width, h: v.height } : { l: 0, t: 0, w: innerWidth, h: innerHeight }; };
+  const place = () => {
+    if (!pos) return;
+    const v = area(), fit = (center, size, start, len) => Math.max(start + 4, Math.min(center - size / 2, start + len - size - 4));
+    rule.textContent = `${selector} { left: ${fit(v.l + pos.x * v.w, pos.w, v.l, v.w)}px !important; top: ${fit(v.t + pos.y * v.h, pos.h, v.t, v.h)}px !important; right: auto !important; bottom: auto !important; }`;
+  };
+  place();
+  addEventListener('resize', place);
+  if (window.visualViewport) { visualViewport.addEventListener('resize', place); visualViewport.addEventListener('scroll', place); }
+  document.addEventListener('pointerdown', e => {
+    const el = e.button === 0 && e.target.closest(selector);
+    if (!el) return;
+    const box = el.getBoundingClientRect(), { clientX: startX, clientY: startY } = e;
+    let moved = false;
+    const onMove = ev => {
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+      moved = true;
+      const v = area();
+      pos = { x: (box.left + box.width / 2 + ev.clientX - startX - v.l) / v.w, y: (box.top + box.height / 2 + ev.clientY - startY - v.t) / v.h, w: box.width, h: box.height };
+      place();
+    };
+    const onEnd = () => {
+      removeEventListener('pointermove', onMove); removeEventListener('pointerup', onEnd); removeEventListener('pointercancel', onEnd);
+      if (!moved) return;
+      try { localStorage.setItem(storeKey, JSON.stringify(pos)); } catch (e) {}
+      const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };   // 放開時瀏覽器還會補一個 click，不能把它當成按按鈕
+      document.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener('click', swallow, true), 300);
+    };
+    addEventListener('pointermove', onMove); addEventListener('pointerup', onEnd); addEventListener('pointercancel', onEnd);
+  });
+};
+makeDraggable('#page-btn', 'page-btn');
+// 換頁：電腦與手機橫向分兩頁（手機直向整份一頁，CSS 不看這個 class）；回到第 1 頁時圖表要重新量尺寸（藏起來時量不到）
+let mobilePage = 1;
+function setMobilePage(n) {
+  mobilePage = n;
+  document.body.classList.toggle('m-page-2', n === 2);
+  document.getElementById('page-btn').innerText = n === 2 ? '◀ 上一頁' : '下一頁 ▶';
+  const root = document.getElementById('app-root');
+  if (root) root.scrollTop = 0;
+  window.scrollTo(0, 0);
+  if (n === 1) { lastOnSess = null; window.dispatchEvent(new Event('resize')); resize(); }   // 藏起來時捲動位置會歸零，回來要重新捲到選的那一盤
+}
+document.getElementById('page-btn').onclick = () => setMobilePage(mobilePage === 2 ? 1 : 2);
+// 手機排版（直向、橫向）：圖表高度交給 CSS，Y 軸排窄一點把寬度留給線
+const phoneLayout = () => document.documentElement.classList.contains('m-portrait') || matchMedia('(orientation: landscape) and (max-height: 600px)').matches;
 // ───────────── 設定 ─────────────
 // 預設顯示的線、顏色與 Y 軸位置（L=左, R=右）；其餘數值欄位會自動變成可勾選的線
 const KNOWN = {
@@ -263,6 +513,9 @@ const KNOWN = {
   '時間價值':   { color: '#7c3aed', side: 'R', on: true },
   '時價膨脹率': { color: '#f59e0b', side: 'R', on: true }
 };
+// 獲利率虧錢（負數）一律用綠色，其他線照自己的顏色
+const LOSS_COLOR = '#16a34a';
+const toneOf = (s, v) => s.name === '獲利率' && v < 0 ? LOSS_COLOR : s.color;
 const hexRgb = c => { const n = parseInt(c.slice(1), 16); return `${n >> 16 & 255},${n >> 8 & 255},${n & 255}`; };
 const PALETTE = ['#10b981', '#0ea5e9', '#db2777', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a16207', '#be123c', '#0f766e', '#9333ea'];
 const PCT = { '獲利率': 1, '時價膨脹率': 1 };            // 以 % 顯示的線
@@ -281,11 +534,13 @@ function calcInflation(clean) {
     return +((v - base) / base * 100).toFixed(2);
   });
 }
+// 不顯示的欄位：不畫線、不列選線鈕（存提款仍用來算獲利率）
+const HIDE_LINES = { '買權點數': 1, '賣權點數': 1, '買權Delta': 1, '賣權Delta': 1, '總Delta': 1, '存提款': 1, '維持率': 1 };
 const INT_GRID = '時價膨脹率';         // 這條線的 Y 軸固定畫在整數 % 關卡（1%、2%、3%…）
 // 膨脹率分區上色：≤ lo% 用 cLo、≥ hi% 用 cHi（畫面上可改，會記住）
 const ZONE = { lo: 2, hi: 8, cLo: '#16a34a', cHi: '#dc2626' };
 try { Object.assign(ZONE, JSON.parse(localStorage.getItem('acctChart11Zone') || '{}')); } catch (e) {}
-const AXW = 74;                       // 每個 Y 軸佔的寬度
+let AXW = 74;                         // 每個 Y 軸佔的寬度（手機排版、窄視窗改窄，見 draw）
 const AXIS_DEC4 = { '期貨指數': 1, '總點數': 1, '時間價值': 1 };   // 這幾條的 Y 軸刻度和滑鼠提示固定顯示到小數點 4 位
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
 // 波動率（顯示在日期按鈕「剩N天」下面，也列在頁面下方的表格）：'月日': [漲跌, 最高, 最低, 開盤, 收盤]；新的日子照格式往下加
@@ -703,6 +958,21 @@ function loadTable(table, name) {
     if (sessions[i].ei - sessions[i].si < 5) { sessions[i - 1].ei = sessions[i].ei; sessions.splice(i, 1); }
   }
 
+  // 帳戶總市值：濾掉跳針（連續 1~3 筆偏離超過 2%，而前後正常值相差不到 0.5%），先濾才不會影響當盤基準和獲利率；入金是跳上去就不回來，不會被濾到
+  const mvRaw = cols['帳戶總市值'];
+  let mvFixed = 0;
+  if (mvRaw) for (let i = 1; i < mvRaw.length - 1; i++) {
+    const p = mvRaw[i - 1];
+    if (!p || !mvRaw[i] || Math.abs(mvRaw[i] - p) <= p * 0.02) continue;
+    for (let k = 1; k <= 3 && i + k < mvRaw.length; k++) {
+      const q = mvRaw[i + k];
+      if (q && Math.abs(q - p) < p * 0.005) {
+        for (let j = 0; j < k; j++) mvRaw[i + j] = +(p + (q - p) * (j + 1) / (k + 1)).toFixed(2);
+        mvFixed += k;
+        break;
+      }
+    }
+  }
   // 獲利率(%) = (帳戶總市值 − 存提款 − 當盤基準) ÷ 當盤基準，每一盤各自重新起算；檔案若已有「獲利率」欄則直接用
   // 當盤基準 = 當盤 09:31~09:35 的平均；當盤沒有這段時間時，用當盤開盤（台指期早盤 08:45、夜盤 15:00；大陸股市 09:30）後最早 5 分鐘的平均。值為 0 的不算
   let baseNote = '', prCut = null;
@@ -774,7 +1044,7 @@ function loadTable(table, name) {
   applyErase();
   if (!tw) cols['波動率(新浪)'] = sinaVals(rows);           // 新浪價平 IV 依分鐘對到每一列（之後每分鐘重新讀檔時更新）
   Object.keys(KNOWN).forEach(n => { if (cols[n]) add(n, cols[n]); });
-  Object.keys(cols).forEach(n => { if (!KNOWN[n]) add(n, cols[n]); });
+  Object.keys(cols).forEach(n => { if (KNOWN[n]) return; if (HIDE_LINES[n]) { pi++; altSide++; return; } add(n, cols[n]); });
   // 上次勾選的線（存在這台電腦的瀏覽器），重新開啟網頁也照舊顯示
   try { const saved = JSON.parse(localStorage.getItem(SERIES_KEY) || 'null'); if (saved) series.forEach(s => { if (s.name in saved) s.on = saved[s.name]; }); } catch (e) {}
   if (!series.some(s => s.on)) series.slice(0, 4).forEach(s => s.on = true);
@@ -789,19 +1059,62 @@ function loadTable(table, name) {
   view = cur ? { a: cur.si, b: cur.ei } : { a: 0, b: rows.length - 1 };
   hoverIdx = null;
   $('drop').classList.add('hidden'); $('main').classList.remove('hidden');
-  $('title').textContent = '50ETF期權績效表　' + (name || '帳務資訊').replace(/\.(csv|xlsx|txt)$/i, '');
-  $('subtitle').textContent = `${rows[0].full} ～ ${rows[rows.length - 1].full} · 共 ${rows.length.toLocaleString()} 筆` + (offHours ? ` · 已略過非交易時間（午休、盤前盤後）${offHours} 筆` : '') + (tvDropped ? ` · 時間價值已濾掉 ${tvDropped} 筆不準的數字` : '') + (erasedN ? ` · 手動擦掉 ${erasedN} 點` : '') + baseNote;
+  $('fileTag').textContent = (name || '帳務資訊').replace(/\.(csv|xlsx|txt)$/i, '').replace(/^AccountInfo_100-$/, '大陸帳號');
+  $('subtitle').textContent = `${rows[0].full} ～ ${rows[rows.length - 1].full} · 共 ${rows.length.toLocaleString()} 筆` + (offHours ? ` · 已略過非交易時間（午休、盤前盤後）${offHours} 筆` : '') + (tvDropped ? ` · 時間價值已濾掉 ${tvDropped} 筆不準的數字` : '') + (mvFixed ? ` · 帳戶總市值已修正 ${mvFixed} 筆跳針` : '') + (erasedN ? ` · 手動擦掉 ${erasedN} 點` : '') + baseNote;
   document.title = '50ETF期權績效表';
   $('lowN').value = TV_LOWN;
   $('lowBar').classList.toggle('hidden', !series.some(s => s.name === '時價膨脹率'));
-  buildChips(); buildSessions(); buildVolTable(); buildDailyTable(); fitChart(); resize(); buildZone();
+  buildChips(); buildSessions(); buildVolTable(); buildDailyTable(); fitChart(); resize(); fitChart(); buildZone();
 }
 
 // ───────────── 介面 ─────────────
+const CHIP_ORDER_KEY = 'acctChart11ChipOrder';
 function buildChips() {
-  $('chips').innerHTML = '<span class="hint">顯示線條</span>' + D.series.map((s, i) =>
-    `<button class="chip${s.on ? ' on' : ''}" style="--c:${s.color}" data-i="${i}">${s.name}</button>`).join('');
+  let order = [];
+  try { order = JSON.parse(localStorage.getItem(CHIP_ORDER_KEY) || '[]'); } catch (e) {}
+  const rank = s => { const k = order.indexOf(s.name); return k < 0 ? order.length : k; };
+  const list = D.series.map((s, i) => ({ s, i })).sort((p, q) => rank(p.s) - rank(q.s) || p.i - q.i);   // 沒排過的照原本順序放後面
+  $('chips').innerHTML = '<span class="hint" title="按鈕可以用滑鼠左右拖曳排順序">顯示線條</span>' + list.map(({ s, i }) =>
+    `<button class="chip${s.on ? ' on' : ''}" style="--c:${s.color}" data-i="${i}">${s.name}<b></b><small></small></button>`).join('');
 }
+// 寬度不夠就一級一級收窄；內容和寬度都沒變就不重算（滑鼠移動時每次畫圖都會呼叫）
+let chipFitKey = '';
+function fitChips() {
+  const el = $('chips'), lv = ['snug', 'tight', 'tighter', 'tightest'];
+  if (!el.clientWidth) return;
+  const key = el.clientWidth + '|' + el.textContent;
+  if (key === chipFitKey) return;
+  chipFitKey = key;
+  el.classList.remove(...lv);
+  if (phoneLayout()) return;
+  for (const c of lv) { if (el.scrollWidth <= el.clientWidth) break; el.classList.add(c); }
+}
+// 滑鼠左右拖曳排順序：游標跨過隔壁按鈕的中線就換位置；放開時記住（只改按鈕順序，不影響圖上的線和 Y 軸）
+let chipDrag = null, chipDragged = false;
+$('chips').addEventListener('pointerdown', e => {
+  const c = e.target.closest('.chip');
+  if (c && e.pointerType === 'mouse' && e.button === 0) chipDrag = { c, x: e.clientX, on: false };
+});
+function endChipDrag() {
+  const d = chipDrag; chipDrag = null;
+  if (!d || !d.on) return;
+  d.c.classList.remove('dragging'); $('chips').classList.remove('sorting');
+  try { localStorage.setItem(CHIP_ORDER_KEY, JSON.stringify([...$('chips').querySelectorAll('.chip')].map(x => D.series[x.dataset.i].name))); } catch (e) {}
+  chipDragged = true; setTimeout(() => chipDragged = false, 300);     // 放開時瀏覽器還會補一個 click，不能當成按按鈕
+}
+window.addEventListener('pointermove', e => {
+  if (!chipDrag) return;
+  const { c } = chipDrag;
+  if (!c.isConnected || !e.buttons) { endChipDrag(); return; }        // 拖到一半資料更新、或在視窗外放開
+  if (!chipDrag.on) {
+    if (Math.abs(e.clientX - chipDrag.x) < 6) return;
+    chipDrag.on = true; c.classList.add('dragging'); $('chips').classList.add('sorting');
+  }
+  const after = [...$('chips').querySelectorAll('.chip')].find(x => { if (x === c) return false; const r = x.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+  if (after) { if (c.nextElementSibling !== after) $('chips').insertBefore(c, after); }
+  else if ($('chips').lastElementChild !== c) $('chips').appendChild(c);
+});
+window.addEventListener('pointerup', endChipDrag);
 // 改「最低 N 點」→ 立刻重算膨脹率
 // 膨脹率分區：門檻與顏色（低門檻要小於高門檻才套用）
 function showZoneInputs() { $('zLo').value = ZONE.lo; $('zHi').value = ZONE.hi; $('zcLo').value = ZONE.cLo; $('zcHi').value = ZONE.cHi; }
@@ -820,8 +1133,9 @@ showZoneInputs();
 $('zoneBody').onclick = e => {
   const tr = e.target.closest('tr'); if (!tr || !D) return;
   const s = D.sessions[tr.dataset.i];
+  setMobilePage(1);                                        // 表格在第 2 頁，點了之後回圖表
   setView(s ? s.si : 0, s ? s.ei : D.rows.length - 1);
-  $('chartCard').scrollIntoView({ behavior: 'smooth', block: 'start' });   // 表格在最下面，點了之後捲回圖表
+  $('chartCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 $('lowN').oninput = e => {
@@ -833,22 +1147,68 @@ $('lowN').oninput = e => {
 };
 const SERIES_KEY = 'acctChart11Series';
 $('chips').onclick = e => {
-  const i = e.target.dataset.i; if (i === undefined) return;
-  D.series[i].on = !D.series[i].on; buildChips(); draw();
+  const c = e.target.closest('.chip'); if (!c || chipDragged) return;
+  const i = c.dataset.i;
+  D.series[i].on = !D.series[i].on; buildChips(); draw(); fitChart();
   try { localStorage.setItem(SERIES_KEY, JSON.stringify(Object.fromEntries(D.series.map(s => [s.name, s.on])))); } catch (err) {}
 };
+// 盤別區：放得下就平分整排；放不下時算出一次能顯示幾張整張（含最右邊固定的「全部」），其他左右捲
+const SESS_GAP = 4;
+let sessCardW = 0, sessPerView = 0, lastOnSess = null;
+function fitSessions() {
+  const el = $('sessions'), W = el.clientWidth;
+  if (!W || !D) return;
+  const gap = parseFloat(getComputedStyle(el).columnGap) || SESS_GAP, min = parseFloat(getComputedStyle(el).getPropertyValue('--smin')) || 156;
+  const total = D.sessions.length + 1;
+  sessPerView = Math.max(2, Math.min(total, Math.floor((W + gap) / (min + gap))));
+  sessCardW = (W - (sessPerView - 1) * gap) / sessPerView;
+  $('session-row').style.setProperty('--sw', sessCardW + 'px');
+  el.classList.toggle('over', total > sessPerView);
+  sessArrows();
+}
+function sessArrows() {
+  const el = $('sessions'), max = el.scrollWidth - el.clientWidth;
+  $('sessPrev').classList.toggle('hidden', max <= 1 || el.scrollLeft <= 1);
+  $('sessNext').classList.toggle('hidden', max <= 1 || el.scrollLeft >= max - 1);
+}
+// 選到的盤在畫面外就捲過去（剛開頁面時預設最新一盤，所以會停在最右邊）
+function showOnSess(btn) {
+  const el = $('sessions'), left = btn.offsetLeft, right = left + btn.offsetWidth, room = el.clientWidth - sessCardW - SESS_GAP;
+  if (left < el.scrollLeft) el.scrollLeft = left;
+  else if (right > el.scrollLeft + room) el.scrollLeft = right - room;
+}
+$('sessions').addEventListener('scroll', sessArrows, { passive: true });
+$('sessions').addEventListener('wheel', e => {
+  const el = $('sessions');
+  if (el.scrollWidth <= el.clientWidth) return;
+  e.preventDefault();
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  el.scrollBy({ left: Math.abs(d) >= 40 ? Math.sign(d) * (sessCardW + SESS_GAP) : d, behavior: Math.abs(d) >= 40 ? 'smooth' : 'auto' });   // 滑鼠滾輪一格一張；觸控板照手勢
+}, { passive: false });
+const sessPage = dir => $('sessions').scrollBy({ left: dir * (sessPerView - 1) * (sessCardW + SESS_GAP), behavior: 'smooth' });
+$('sessPrev').onclick = () => sessPage(-1);
+$('sessNext').onclick = () => sessPage(1);
+let sessViewW = window.innerWidth;
+window.addEventListener('resize', () => {                   // 寬度真的變了才重新捲到選的盤（手機網址列收合只改高度）
+  if (window.innerWidth !== sessViewW) { sessViewW = window.innerWidth; lastOnSess = null; }
+  fitSessions();
+});
 function buildSessions() {
-  $('sessions').innerHTML = `<button class="sess" data-i="-1">全部</button>` + D.sessions.map((s, i) =>
-    `<button class="sess${s.night ? ' night' : ''}" data-i="${i}">${s.label}<small>剩${daysLeft(s.key)}天</small>${volBox(s.key)}</button>`).join('');
+  const S = D.sessions, ml = s => s.label.slice(0, 5), sl = $('sessions').scrollLeft;
+  $('sessions').innerHTML = S.map((s, i) =>
+    `<button class="sess${s.night ? ' night' : ''}" data-i="${i}"><span>${s.label}</span><small title="${contractNote(s.key)}">剩${daysLeft(s.key)}天</small>${volBox(s.key)}</button>`).join('') +
+    `<button class="sess" data-i="-1"><span>全部</span><small>${S.length ? `${ml(S[0])}~${ml(S[S.length - 1])}` : ''}</small></button>`;
+  fitSessions();
+  $('sessions').scrollLeft = sl;
 }
 function volBox(key) {
   const md = String(key).slice(4, 8), v = VOL[md], a = dayResult(md);
-  const pnl = a ? `<span class="pnl ${pnlCls(a.sum)}" title="${a.how.replace(/；/g, '&#10;')}">` +
-                  `${a.live ? `盤中 ${a.at} 損益` : '當日淨損益'} ${fmtPnl(a.sum)}<br>獲利 ${fmtPct(a.pct)}</span>` : '';
+  const pnl = a ? `<span class="pnl ${pnlCls(a.sum)}" title="${a.live ? `盤中 ${a.at} 損益` : '當日淨損益'}&#10;${a.how.replace(/；/g, '&#10;')}">` +
+                  `${a.live ? `盤中 ${a.at} ` : ''}${fmtPnl(a.sum)} ${fmtPct(a.pct)}</span>` : '';
   if (!v) return pnl;
   const [ud, hi, lo, op] = v, f = n => n.toFixed(2), img = !!VOL_IMG[md];
-  return `<span class="vol${img ? ' img' : ''}" data-md="${md}"${img ? ' title="點這裡看分時圖"' : ''}><b class="${ud === '漲' ? 'up' : 'dn'}">波動率 ${ud}</b>` +
-         `<span>高 ${f(hi)}　低 ${f(lo)}</span><span>開 ${f(op)}</span>${img ? '<span class="see">🔍 看分時圖</span>' : ''}</span>` + pnl;
+  return pnl + `<span class="vol${img ? ' img' : ''}" data-md="${md}"${img ? ' title="點這裡看分時圖"' : ''}><b class="${ud === '漲' ? 'up' : 'dn'}">波動率 ${ud}</b>${img ? '<span class="see">🔍</span>' : ''}<br>` +
+         `<span>高 ${f(hi)}</span><span>低 ${f(lo)}</span><span>開 ${f(op)}</span></span>`;
 }
 // 波動率表格（不用載入檔案也會顯示）：區間最高、最低用粗體標出
 function buildVolTable() {
@@ -914,8 +1274,9 @@ const SINA_SRC = 'cluade/sina_vol/sina_vol_data.js';
 let sinaDay = null;
 // 帳務 CSV 從 GitHub 的 live 分支讀（每分鐘由 upload_site.js 更新），打開就有主圖，網站和自己電腦開的畫面一樣
 // 波動率、即時帳務：網站也從 live 分支讀；自己電腦開（file://）讀本機檔案，比較即時。手動選了本機 CSV 之後就不再用網路上的 CSV
-const HOSTED = location.protocol === 'https:';
-const LIVE_BASE = 'https://raw.githubusercontent.com/joption-tw/Investment-Report/live/';
+const LIVE_ROOT = 'https://raw.githubusercontent.com/joption-tw/Investment-Report/live/';
+const LIVE_BASE = location.protocol === 'https:' ? LIVE_ROOT : null;
+const SITE_URL = 'joption-tw.github.io/Investment-Report/november/';
 let liveCsvSize = -1, ownFile = false;
 // 盤中找最新傳完的資料夾 m/YYYYMMDDHHmm/（台灣時間，從上一分鐘往回找，不查還沒傳的這一分鐘：查過不存在的檔名會被快取 60 秒）；收盤後用固定檔名
 async function liveDir() {
@@ -923,24 +1284,25 @@ async function liveDir() {
   if (now.getUTCDay() < 1 || now.getUTCDay() > 5 || m < 565 || m > 912) return '';
   for (let k = 1; k <= 4; k++) {
     const d = t8(k), p = 'm/' + d.getUTCFullYear() + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) + p2(d.getUTCHours()) + p2(d.getUTCMinutes()) + '/';
-    try { if ((await fetch(LIVE_BASE + p + 'live_acct.js', { method: 'HEAD' })).ok) return p; } catch (e) {}
+    try { if ((await fetch(LIVE_ROOT + p + 'live_acct.js', { method: 'HEAD' })).ok) return p; } catch (e) {}
   }
   return '';
 }
 async function loadHosted() {
   const dir = await liveDir();
-  const get = p => fetch(LIVE_BASE + dir + p + '?t=' + Date.now(), { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(p + ' ' + r.status); return r; });
+  const get = p => fetch(LIVE_ROOT + dir + p + '?t=' + Date.now(), { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(p + ' ' + r.status); return r; });
   const js = async (p, v) => { const t = await (await get(p)).text(); window[v] = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };
-  if (HOSTED) await Promise.all([js('sina_vol_data.js', 'SINA_VOL'), js('live_acct.js', 'LIVE_ACCT')].map(p => p.catch(e => console.warn(e))));
+  if (LIVE_BASE) await Promise.all([js('sina_vol_data.js', 'SINA_VOL'), js('live_acct.js', 'LIVE_ACCT')].map(p => p.catch(e => console.warn(e))));
   if (!ownFile) try {
     const buf = await (await get('account.csv')).arrayBuffer();
     if (buf.byteLength !== liveCsvSize) { liveCsvSize = buf.byteLength; const keep = keepState(); await loadBuffer(buf, 'AccountInfo_100-.csv'); restoreState(keep); }
   } catch (e) { console.warn(e); }
   refreshSinaLine(); drawSina(); buildVolTable(); buildDailyTable(); if (D) { buildSessions(); draw(); }
+  markLoaded();
 }
 function loadSina() {
   loadHosted();
-  if (HOSTED) return;
+  if (LIVE_BASE) return;
   const s = document.createElement('script');
   s.src = SINA_SRC + '?t=' + Date.now();
   s.onload = s.onerror = () => { s.remove(); refreshSinaLine(); drawSina(); buildVolTable(); };
@@ -1088,13 +1450,18 @@ $('sinaDays').onclick = e => {
   if (s) setView(s.si, s.ei); else drawSina();
 };
 loadSina();
-setInterval(loadSina, 60000);
-// 剩餘天數：到結算日 2026/11/25（11 月合約）還有幾天（日曆天，結算日當天為 0；過了結算日顯示 0）
-const SETTLE_DATE = Date.UTC(2026, 10, 25);
-function daysLeft(key) {
-  const k = parseInt(key), d = Date.UTC(k / 10000 | 0, (k / 100 | 0) % 100 - 1, k % 100);
-  return Math.max(0, Math.round((SETTLE_DATE - d) / 86400000));
+if (!LIVE_BASE) setInterval(loadSina, 60000);   // 網站上由同步鈕的倒數觸發（tick）
+// 剩餘天數：到正在做的合約到期日還有幾天（日曆天）。上證 50ETF 期權每月第 4 個星期三到期（遇假日交易所會順延，這裡沒算）
+// 到期前 ROLL_DAYS 天內改算下個月的合約（10/26 離 10 月合約到期只剩 2 天，實際已經在做 11 月）
+const ROLL_DAYS = 7;
+const expiryOf = (y, m) => Date.UTC(y, m, 22 + (10 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7);
+function contractOf(key) {
+  const k = parseInt(key), y = k / 10000 | 0, m = (k / 100 | 0) % 100 - 1, day = Date.UTC(y, m, k % 100);
+  const t = new Date(Date.UTC(y, m + ((expiryOf(y, m) - day) / 86400000 <= ROLL_DAYS ? 1 : 0), 1));
+  return { day, exp: expiryOf(t.getUTCFullYear(), t.getUTCMonth()), month: t.getUTCMonth() + 1 };
 }
+function daysLeft(key) { const c = contractOf(key); return Math.round((c.exp - c.day) / 86400000); }
+function contractNote(key) { const c = contractOf(key), e = new Date(c.exp); return `${c.month}月合約，${e.getUTCMonth() + 1}/${e.getUTCDate()} 到期`; }
 $('volBody').onclick = e => { const tr = e.target.closest('tr'); if (tr) openVolImg(tr.dataset.md); };
 $('imgClose').onclick = closeVolImg;
 $('imgModal').onclick = e => { if (e.target.id === 'imgModal') closeVolImg(); };
@@ -1116,20 +1483,28 @@ function setView(a, b) {
 }
 const fmt = (v, dec) => v === null || v === undefined ? '--' : v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
+// 即時數字放在選線鈕裡，不另外佔一排：畫面範圍內最後一筆 + 區間漲跌；滑鼠移上去看低、高
 function updateStats(i0, i1) {
-  const html = D.series.filter(s => s.on).map(s => {
+  document.querySelectorAll('.chip').forEach(el => {
+    const s = D.series[el.dataset.i];
+    if (!s.on) return;
+    const dec = s.name === '時間價值' ? 4 : s.dec;
     let first = null, last = null, lo = Infinity, hi = -Infinity;
     for (let i = i0; i <= i1; i++) { const v = s.vals[i]; if (v === null) continue; if (first === null) first = v; last = v; if (v < lo) lo = v; if (v > hi) hi = v; }
-    if (last === null) return `<div class="card stat" style="--c:${s.color}"><div class="k">${s.name}</div><div class="v">--</div></div>`;
-    const d = last - first, cls = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
-    return `<div class="card stat" style="--c:${s.color}"><div class="k">${s.name}</div><div class="v">${fmt(last, s.dec)}${s.unit}</div>` +
-      `<div class="d ${cls}">區間 ${d > 0 ? '+' : ''}${fmt(d, s.dec)}${s.unit}</div><div class="r">低 ${fmt(lo, s.dec)}　高 ${fmt(hi, s.dec)}</div></div>`;
-  }).join('');
-  $('stats').innerHTML = html;
+    const vEl = el.querySelector('b'), dEl = el.querySelector('small');
+    if (last === null) { vEl.textContent = '--'; dEl.textContent = ''; el.title = ''; return; }
+    const d = last - first, ds = `${d > 0 ? '+' : ''}${fmt(d, dec)}${s.unit}`;
+    vEl.textContent = fmt(last, dec) + s.unit;
+    dEl.textContent = ds;
+    el.style.setProperty('--c', toneOf(s, last));
+    el.title = `${s.name}　區間 ${ds}　低 ${fmt(lo, dec)}　高 ${fmt(hi, dec)}`;
+  });
+  fitChips();
   document.querySelectorAll('.sess').forEach(b => {
     const s = D.sessions[b.dataset.i];
     const on = s ? (Math.round(view.a) === s.si && Math.round(view.b) === s.ei) : (view.a <= 0 && view.b >= D.rows.length - 1);
     b.classList.toggle('on', on && (!!s || D.sessions.length !== 1));
+    if (s && b.classList.contains('on') && lastOnSess !== b.dataset.i) { lastOnSess = b.dataset.i; showOnSess(b); }
   });
 }
 
@@ -1137,18 +1512,22 @@ function updateStats(i0, i1) {
 function resize() {
   if (!D) return;
   const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (!r.width) return;
   cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const k = cv.width / cv.clientWidth;                     // 手機直向 canvas 被 CSS 放大（#cvScale），這裡要把放大算進去才清楚
+  ctx.setTransform(k, 0, 0, k, 0, 0);
   draw();
 }
 new ResizeObserver(resize).observe($('wrap'));
 function fitChart() {                                      // 圖表高度 = 視窗高度 − 圖表上方的區塊 − 下方說明列
-  const w = $('wrap'); if ($('main').classList.contains('hidden')) return;
+  const w = $('wrap'); if ($('main').classList.contains('hidden') || !w.offsetParent) return;
+  if (phoneLayout()) { w.style.height = ''; resize(); return; }
   const top = w.getBoundingClientRect().top + window.scrollY, foot = w.nextElementSibling ? w.nextElementSibling.offsetHeight : 0;
-  const hgt = Math.max(360, Math.floor(window.innerHeight - top - foot - 16));
-  if (Math.abs(w.offsetHeight - hgt) > 2) w.style.height = hgt + 'px';
+  const hgt = Math.max(360, Math.floor(window.innerHeight - top - foot - 20));
+  if (Math.abs(w.offsetHeight - hgt) > 2) { w.style.height = hgt + 'px'; resize(); }
 }
 window.addEventListener('resize', fitChart);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { draw(); fitChart(); });
 
 // 膨脹率的線依區間上色：≤ 低門檻用低區顏色、≥ 高門檻用高區顏色、中間用原本的顏色；跨過門檻的線段在交點切開
 function zoneColor(v, base) { return v <= ZONE.lo ? ZONE.cLo : v >= ZONE.hi ? ZONE.cHi : base; }
@@ -1235,10 +1614,13 @@ function pivots(vals, i0, i1) {
 }
 
 function draw() {
-  if (!D) return;
+  if (!D || !cv.clientWidth) return;
   const W = cv.clientWidth, H = cv.clientHeight;
+  AXW = phoneLayout() || W < 900 ? 52 : 74;
   const act = D.series.filter(s => s.on);
-  const L = act.filter(s => s.side === 'L'), R = act.filter(s => s.side === 'R');
+  // 視窗太窄：每邊只留一個軸的刻度（其他線一樣用自己的刻度畫），寬度留給線
+  const axMax = W < 560 ? 1 : Infinity;
+  const L = act.filter(s => s.side === 'L').slice(0, axMax), R = act.filter(s => s.side === 'R').slice(0, axMax);
   const x0 = 14 + L.length * AXW, x1 = W - 14 - R.length * AXW, y0 = 38, y1 = H - 76;
   const span = view.b - view.a || 1;
   const xOf = i => x0 + (i - view.a) / span * (x1 - x0);
@@ -1246,7 +1628,7 @@ function draw() {
   geom = { x0, x1, y0, y1, span, sy0: H - 30, sy1: H - 6,
            axes: [...L.map((s, k) => ({ s, xa: x0 - (k + 1) * AXW, xb: x0 - k * AXW })),
                   ...R.map((s, k) => ({ s, xa: x1 + k * AXW, xb: x1 + (k + 1) * AXW }))] };
-  const FONT = '"Microsoft JhengHei", "Segoe UI", sans-serif';
+  const FONT = '"Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif';
 
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
@@ -1296,19 +1678,26 @@ function draw() {
     ctx.fillStyle = s.color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.font = `700 11px ${FONT}`;
     for (let v = Math.ceil(s.lo / st) * st; v <= s.hi; v += st) ctx.fillText(v + '%', x, s.yOf(v));
   };
+  const axisTitle = (s, x) => {
+    const t = s.name + (s.manual ? ' ↕' : ''), room = AXW - 4;
+    ctx.font = `700 12px ${FONT}`; ctx.textBaseline = 'alphabetic';
+    const w = ctx.measureText(t).width;
+    if (w > room) ctx.font = `700 ${Math.max(8, Math.floor(12 * room / w))}px ${FONT}`;
+    ctx.fillText(t, x, y0 - 16);
+  };
   const drawAxis = (s, x, align) => {
     if (s.name === INT_GRID) {
       drawIntAxis(s, x, align);
-      ctx.fillStyle = s.color; ctx.font = `700 12px ${FONT}`; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(s.name + (s.manual ? ' ↕' : ''), x, y0 - 16);
+      ctx.fillStyle = s.color;
+      axisTitle(s, x);
       ctx.fillRect(align === 'right' ? x - 22 : x, y0 - 12, 22, 3);
       return;
     }
     const sp = s.hi - s.lo, dec = AXIS_DEC4[s.name] ? 4 : s.dec === 0 && sp >= DIV ? 0 : sp >= 200 ? 0 : sp >= 20 ? 1 : sp >= 1 ? 2 : 3;
     ctx.fillStyle = s.color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.font = `800 12px ${FONT}`;
-    for (let k = 0; k <= DIV; k++) ctx.fillText(fmt(s.hi - sp * k / DIV, dec) + s.unit, x, y0 + (y1 - y0) * k / DIV);
-    ctx.font = `700 12px ${FONT}`; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(s.name + (s.manual ? ' ↕' : ''), x, y0 - 16);
+    for (let k = 0; k <= DIV; k++) { const v = s.hi - sp * k / DIV; ctx.fillStyle = toneOf(s, v); ctx.fillText(fmt(v, dec) + s.unit, x, y0 + (y1 - y0) * k / DIV); }
+    ctx.fillStyle = s.color;
+    axisTitle(s, x);
     ctx.fillRect(align === 'right' ? x - 22 : x, y0 - 12, 22, 3);
   };
   L.forEach((s, k) => drawAxis(s, x0 - 8 - k * AXW, 'right'));
@@ -1365,15 +1754,15 @@ function draw() {
       for (let k = 1; k < pts.length - 1; k++) ctx.quadraticCurveTo(pts[k][0], pts[k][1], (pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2);
       if (pts.length > 1) ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
     };
-    if (s.name === '獲利率') {                             // 獲利率：0% 以上深色面積、以下淺色面積
-      const yb = clamp(s.yOf(0), y0, y1), rgb = hexRgb(s.color);
+    if (s.name === '獲利率') {                             // 獲利率：0% 以上紅色面積、以下綠色面積，離 0 越遠越深
+      const yb = clamp(s.yOf(0), y0, y1), rgb = hexRgb(s.color), rgbLoss = hexRgb(LOSS_COLOR);
       for (const pts of segs) {
         if (pts.length < 2) continue;
         ctx.beginPath(); trace(pts); ctx.lineTo(pts[pts.length - 1][0], yb); ctx.lineTo(pts[0][0], yb); ctx.closePath();
         ctx.save(); ctx.clip();
         let gr = ctx.createLinearGradient(0, y0, 0, yb); gr.addColorStop(0, `rgba(${rgb},.6)`); gr.addColorStop(1, `rgba(${rgb},.18)`);
         ctx.fillStyle = gr; ctx.fillRect(x0, y0, x1 - x0, yb - y0);
-        gr = ctx.createLinearGradient(0, yb, 0, y1); gr.addColorStop(0, `rgba(${rgb},.08)`); gr.addColorStop(1, `rgba(${rgb},.3)`);
+        gr = ctx.createLinearGradient(0, yb, 0, y1); gr.addColorStop(0, `rgba(${rgbLoss},.18)`); gr.addColorStop(1, `rgba(${rgbLoss},.6)`);
         ctx.fillStyle = gr; ctx.fillRect(x0, yb, x1 - x0, y1 - yb);
         ctx.restore();
       }
@@ -1431,7 +1820,7 @@ function draw() {
         const ty = up ? Math.max(y0 - 4, y - 8) : Math.min(y1 + 4, y + 8);
         ctx.textAlign = 'center'; ctx.textBaseline = up ? 'bottom' : 'top';
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.strokeText(t, x, ty);
-        ctx.fillStyle = s.color; ctx.fillText(t, x, ty);
+        ctx.fillStyle = toneOf(s, s.vals[i]); ctx.fillText(t, x, ty);
       };
       if (hi !== null) mark(hi, true);
       if (s.name === '獲利率' && lo !== null && s.vals[lo] < 0) mark(lo, false);
@@ -1456,7 +1845,7 @@ function draw() {
       const ty = clamp(y + d * 13, y0 + 2, y1 - 2);
       ctx.textBaseline = p.hi ? 'bottom' : 'top';
       ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeText(fmt(s.vals[p.i], dec) + s.unit, x, ty);
-      ctx.fillStyle = s.color; ctx.fillText(fmt(s.vals[p.i], dec) + s.unit, x, ty);
+      ctx.fillStyle = toneOf(s, s.vals[p.i]); ctx.fillText(fmt(s.vals[p.i], dec) + s.unit, x, ty);
     });
   });
 
@@ -1757,7 +2146,20 @@ function flash(text, bad) {
 }
 
 $('btnOpen').onclick = $('drop').onclick = pickFile;
-$('btnReload').onclick = () => reload();
+// 同步數據：網站上重新抓 live 分支的資料；自己電腦開照舊重讀檔案
+const syncNow = () => LIVE_BASE ? loadHosted() : fileHandle ? reload() : loadSina();
+$('btnReload').onclick = syncNow;
+if (!LIVE_BASE) $('btnHome').href = 'https://joption-tw.github.io/Investment-Report/';   // 自己電腦開時，回總表要連到網站
+const SHORT_URL = LIVE_BASE ? location.host + location.pathname : SITE_URL;
+$('btnCopy').textContent = '🔗 ' + SHORT_URL;
+$('btnCopy').onclick = () => {
+  if (!navigator.clipboard) return;
+  navigator.clipboard.writeText(LIVE_BASE ? location.href : 'https://' + SITE_URL).then(() => {
+    $('btnCopy').textContent = '🔗 已複製網址';
+    setTimeout(() => $('btnCopy').textContent = '🔗 ' + SHORT_URL, 1500);
+  }).catch(() => {});
+};
+if (!D) $('dropTitle').textContent = '資料同步中…';
 function setPivots(on) {
   showPivots = on; $('btnPivot').classList.toggle('on', on);
   try { localStorage.setItem('acctChart11Pivots', on ? '1' : '0'); } catch (e) {}
@@ -1769,16 +2171,24 @@ $('btnPivot').classList.toggle('on', showPivots);
 const AUTO_SEC = 60;
 let left = AUTO_SEC;
 function tick() {
-  const cd = $('countdown'), paused = eraser || !fileHandle;
+  const cd = $('countdown'), paused = eraser;
   cd.classList.toggle('off', paused);
-  cd.title = !fileHandle ? '用「開啟檔案」或拖曳開檔後才會自動載入' : eraser ? '橡皮擦模式中暫停自動載入' : '距離下次自動載入';
-  if (!paused && --left <= 0) { left = AUTO_SEC; reload(true); }
+  cd.title = eraser ? '橡皮擦模式中暫停自動載入' : '距離下次自動載入';
+  if (!paused && --left <= 0) { left = AUTO_SEC; if (LIVE_BASE) loadHosted(); else reload(true); }
   cd.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
 setInterval(tick, 1000);
+// LIVE 標籤：盤中（台灣時間週一～五 09:25~15:12，跟 liveDir 同一段）亮 LIVE，其他時間是已收盤
+function showLive() {
+  const now = new Date(Date.now() + 288e5), m = now.getUTCHours() * 60 + now.getUTCMinutes(), on = now.getUTCDay() >= 1 && now.getUTCDay() <= 5 && m >= 565 && m <= 912;
+  $('liveTag').classList.remove('hidden');
+  $('liveTag').classList.toggle('live', on); $('liveTag').classList.toggle('closed', !on);
+  $('liveText').textContent = on ? 'LIVE' : '已收盤';
+}
 function markLoaded() {
   left = AUTO_SEC;
-  $('lastLoad').textContent = '最新載入：' + new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  $('lastLoad').textContent = '更新 ' + new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  showLive();
 }
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
@@ -1786,7 +2196,7 @@ window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
   if (mod && k === 'z') { e.preventDefault(); undoErase(); return; }
   if (mod || e.altKey) return;
-  if (k === 'r') reload();
+  if (k === 'r') syncNow();
   else if (k === 'p') setPivots(!showPivots);
   else if (k === 'e' && D) setEraser(!eraser);
   else if (e.key === 'Escape' && eraser) setEraser(false);
@@ -1811,7 +2221,8 @@ $('btnPng').onclick = () => {
   const c = out.getContext('2d');
   c.fillStyle = '#fff'; c.fillRect(0, 0, out.width, out.height);
   c.fillStyle = '#0f172a'; c.font = `900 ${20 * dpr}px "Microsoft JhengHei", sans-serif`; c.textBaseline = 'top';
-  c.fillText($('title').textContent, 16 * dpr, 10 * dpr);
+  const pngName = '50ETF期權績效表　' + (D.name || '帳務資訊').replace(/\.(csv|xlsx|txt)$/i, '');
+  c.fillText(pngName, 16 * dpr, 10 * dpr);
   const i0 = Math.max(0, Math.ceil(view.a)), i1 = Math.min(D.rows.length - 1, Math.floor(view.b));
   c.fillStyle = '#64748b'; c.font = `${12 * dpr}px "Microsoft JhengHei", sans-serif`;
   c.fillText(`${D.rows[i0].full} ～ ${D.rows[i1].full}`, 16 * dpr, 36 * dpr);
@@ -1819,7 +2230,7 @@ $('btnPng').onclick = () => {
   c.drawImage(cv, 0, head);
   hoverIdx = keep; draw();
   const a = document.createElement('a');
-  a.download = $('title').textContent + '_圖表.png'; a.href = out.toDataURL('image/png'); a.click();
+  a.download = pngName + '_圖表.png'; a.href = out.toDataURL('image/png'); a.click();
 };
 
 // 重新開啟網頁時，自動顯示上次載入的資料
