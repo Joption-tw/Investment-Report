@@ -884,6 +884,7 @@
                             <span className="text-[11px] font-black text-slate-500 mr-1">個別帳號績效</span>
                             ${accountRows.map(r => accountOf(r[0])).filter(Boolean).map(a => html`
                                 <a key=${a.id} href=${accountUrl(a)} className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-black text-blue-700 shadow-sm hover:bg-blue-50 active:bg-blue-100 whitespace-nowrap">${a.name} ›</a>`)}
+                            <a href="november/" className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-black text-blue-700 shadow-sm hover:bg-blue-50 active:bg-blue-100 whitespace-nowrap">大陸帳號 ›</a>
                         </div>
                         <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-2">
                             ${renderMobileCards()}
