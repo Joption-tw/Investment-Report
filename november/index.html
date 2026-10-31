@@ -500,6 +500,9 @@ const KNOWN = {
   '時間價值':   { color: '#7c3aed', side: 'R', on: true },
   '時價膨脹率': { color: '#f59e0b', side: 'R', on: true }
 };
+// 獲利率虧錢（負數）一律用綠色，其他線照自己的顏色
+const LOSS_COLOR = '#16a34a';
+const toneOf = (s, v) => s.name === '獲利率' && v < 0 ? LOSS_COLOR : s.color;
 const hexRgb = c => { const n = parseInt(c.slice(1), 16); return `${n >> 16 & 255},${n >> 8 & 255},${n & 255}`; };
 const PALETTE = ['#10b981', '#0ea5e9', '#db2777', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a16207', '#be123c', '#0f766e', '#9333ea'];
 const PCT = { '獲利率': 1, '時價膨脹率': 1 };            // 以 % 顯示的線
@@ -1360,7 +1363,7 @@ function updateStats(i0, i1) {
     for (let i = i0; i <= i1; i++) { const v = s.vals[i]; if (v === null) continue; if (first === null) first = v; last = v; if (v < lo) lo = v; if (v > hi) hi = v; }
     if (last === null) return `<div class="stat" style="--c:${s.color}"><div class="k">${s.name}</div><div class="v">--</div></div>`;
     const d = last - first, cls = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
-    return `<div class="stat" style="--c:${s.color}"><div class="k">${s.name}</div><div class="v">${fmt(last, s.dec)}${s.unit}</div>` +
+    return `<div class="stat" style="--c:${s.color}"><div class="k">${s.name}</div><div class="v" style="color:${toneOf(s, last)}">${fmt(last, s.dec)}${s.unit}</div>` +
       `<div class="d ${cls}">區間 ${d > 0 ? '+' : ''}${fmt(d, s.dec)}${s.unit}</div><div class="r">低 ${fmt(lo, s.dec)}　高 ${fmt(hi, s.dec)}</div></div>`;
   }).join('');
   $('stats').innerHTML = html;
@@ -1558,7 +1561,8 @@ function draw() {
     }
     const sp = s.hi - s.lo, dec = AXIS_DEC4[s.name] ? 4 : s.dec === 0 && sp >= DIV ? 0 : sp >= 200 ? 0 : sp >= 20 ? 1 : sp >= 1 ? 2 : 3;
     ctx.fillStyle = s.color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.font = `800 12px ${FONT}`;
-    for (let k = 0; k <= DIV; k++) ctx.fillText(fmt(s.hi - sp * k / DIV, dec) + s.unit, x, y0 + (y1 - y0) * k / DIV);
+    for (let k = 0; k <= DIV; k++) { const v = s.hi - sp * k / DIV; ctx.fillStyle = toneOf(s, v); ctx.fillText(fmt(v, dec) + s.unit, x, y0 + (y1 - y0) * k / DIV); }
+    ctx.fillStyle = s.color;
     axisTitle(s, x);
     ctx.fillRect(align === 'right' ? x - 22 : x, y0 - 12, 22, 3);
   };
@@ -1616,15 +1620,15 @@ function draw() {
       for (let k = 1; k < pts.length - 1; k++) ctx.quadraticCurveTo(pts[k][0], pts[k][1], (pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2);
       if (pts.length > 1) ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
     };
-    if (s.name === '獲利率') {                             // 獲利率：0% 以上深色面積、以下淺色面積
-      const yb = clamp(s.yOf(0), y0, y1), rgb = hexRgb(s.color);
+    if (s.name === '獲利率') {                             // 獲利率：0% 以上紅色面積、以下綠色面積，離 0 越遠越深
+      const yb = clamp(s.yOf(0), y0, y1), rgb = hexRgb(s.color), rgbLoss = hexRgb(LOSS_COLOR);
       for (const pts of segs) {
         if (pts.length < 2) continue;
         ctx.beginPath(); trace(pts); ctx.lineTo(pts[pts.length - 1][0], yb); ctx.lineTo(pts[0][0], yb); ctx.closePath();
         ctx.save(); ctx.clip();
         let gr = ctx.createLinearGradient(0, y0, 0, yb); gr.addColorStop(0, `rgba(${rgb},.6)`); gr.addColorStop(1, `rgba(${rgb},.18)`);
         ctx.fillStyle = gr; ctx.fillRect(x0, y0, x1 - x0, yb - y0);
-        gr = ctx.createLinearGradient(0, yb, 0, y1); gr.addColorStop(0, `rgba(${rgb},.08)`); gr.addColorStop(1, `rgba(${rgb},.3)`);
+        gr = ctx.createLinearGradient(0, yb, 0, y1); gr.addColorStop(0, `rgba(${rgbLoss},.18)`); gr.addColorStop(1, `rgba(${rgbLoss},.6)`);
         ctx.fillStyle = gr; ctx.fillRect(x0, yb, x1 - x0, y1 - yb);
         ctx.restore();
       }
@@ -1682,7 +1686,7 @@ function draw() {
         const ty = up ? Math.max(y0 - 4, y - 8) : Math.min(y1 + 4, y + 8);
         ctx.textAlign = 'center'; ctx.textBaseline = up ? 'bottom' : 'top';
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.strokeText(t, x, ty);
-        ctx.fillStyle = s.color; ctx.fillText(t, x, ty);
+        ctx.fillStyle = toneOf(s, s.vals[i]); ctx.fillText(t, x, ty);
       };
       if (hi !== null) mark(hi, true);
       if (s.name === '獲利率' && lo !== null && s.vals[lo] < 0) mark(lo, false);
@@ -1707,7 +1711,7 @@ function draw() {
       const ty = clamp(y + d * 13, y0 + 2, y1 - 2);
       ctx.textBaseline = p.hi ? 'bottom' : 'top';
       ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeText(fmt(s.vals[p.i], dec) + s.unit, x, ty);
-      ctx.fillStyle = s.color; ctx.fillText(fmt(s.vals[p.i], dec) + s.unit, x, ty);
+      ctx.fillStyle = toneOf(s, s.vals[p.i]); ctx.fillText(fmt(s.vals[p.i], dec) + s.unit, x, ty);
     });
   });
 
