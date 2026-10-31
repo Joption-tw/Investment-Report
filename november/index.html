@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>帳務圖表11月</title>
+<title>50ETF期權績效表</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; background: #f1f5f9; color: #0f172a; font-family: "Microsoft JhengHei", "PingFang TC", "Segoe UI", sans-serif; }
@@ -160,7 +160,7 @@
 <div id="root">
   <header class="card">
     <div class="grow">
-      <h1 id="title">帳務圖表11月</h1>
+      <h1 id="title">50ETF期權績效表</h1>
       <div class="sub" id="subtitle">尚未載入檔案 · 資料只在本機瀏覽器處理，不會上傳</div>
     </div>
     <button class="btn" id="btnOpen">開啟檔案</button>
@@ -789,9 +789,9 @@ function loadTable(table, name) {
   view = cur ? { a: cur.si, b: cur.ei } : { a: 0, b: rows.length - 1 };
   hoverIdx = null;
   $('drop').classList.add('hidden'); $('main').classList.remove('hidden');
-  $('title').textContent = '帳務圖表11月　' + (name || '帳務資訊').replace(/\.(csv|xlsx|txt)$/i, '');
+  $('title').textContent = '50ETF期權績效表　' + (name || '帳務資訊').replace(/\.(csv|xlsx|txt)$/i, '');
   $('subtitle').textContent = `${rows[0].full} ～ ${rows[rows.length - 1].full} · 共 ${rows.length.toLocaleString()} 筆` + (offHours ? ` · 已略過非交易時間（午休、盤前盤後）${offHours} 筆` : '') + (tvDropped ? ` · 時間價值已濾掉 ${tvDropped} 筆不準的數字` : '') + (erasedN ? ` · 手動擦掉 ${erasedN} 點` : '') + baseNote;
-  document.title = '帳務圖表11月';
+  document.title = '50ETF期權績效表';
   $('lowN').value = TV_LOWN;
   $('lowBar').classList.toggle('hidden', !series.some(s => s.name === '時價膨脹率'));
   buildChips(); buildSessions(); buildVolTable(); buildDailyTable(); fitChart(); resize(); buildZone();
