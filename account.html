@@ -202,6 +202,14 @@
         const { useState, useEffect, useCallback, useRef } = React;
         const params = new URLSearchParams(location.search);
         const ACCT = ACCOUNTS.find(a => a.id === params.get('id')) || accountOf(params.get('name'));
+        // 示範帳號 2026 年起的歷史：從下單程式的合約紀錄補回（scripts/import_demo_history.ts），只有這個帳號有；同一盤以網站存檔為準
+        const HISTORY_DIR = ACCT && ACCT.id === 'demo' ? 'data/demo-history' : null;
+        const HISTORY_UNTIL = '2026-10-28';   // 這一週起網站自己有完整紀錄
+        const withHistory = (history, own) => {
+            if (!history) return own;
+            const has = new Set(own.map(s => `${s.week}#${s.slot}`));
+            return [...history.filter(s => !has.has(`${s.week}#${s.slot}`)), ...own].sort((a, b) => a.week < b.week ? -1 : a.week > b.week ? 1 : a.slot - b.slot);
+        };
 
         // 走勢圖每一條線都可以自己開關；同一個軸的線共用刻度，只有畫出來的線的軸才顯示
         const AXES = {
@@ -495,9 +503,9 @@
             const loadLive = useCallback(async () => {
                 const t = Date.now();
                 const since = new Date(tpeNow().getTime() - 3 * 3600e3).toISOString().slice(0, 19).replace('T', ' ').replace(/-/g, '/');
-                const [s, sn, lg, v, er] = await Promise.all([getJSON(`${SESSIONS_URL}?t=${t}`), getText(`${SNAPS_URL}&t=${t}`), getText(`${LOG_URL(since)}&t=${t}`),
-                                                              getJSON(VIX_URL), getText(`${ERASE_LOG_URL}&t=${t}`)]);
-                if (s) setSessions(await fillMissing(s.sessions || [], slotAt(tpeNow()).week));
+                const [s, sn, lg, v, er, h] = await Promise.all([getJSON(`${SESSIONS_URL}?t=${t}`), getText(`${SNAPS_URL}&t=${t}`), getText(`${LOG_URL(since)}&t=${t}`),
+                                                                 getJSON(VIX_URL), getText(`${ERASE_LOG_URL}&t=${t}`), HISTORY_DIR ? getJSON(`${HISTORY_DIR}/sessions.json`) : null]);
+                if (s) setSessions(withHistory(h && h.sessions, await fillMissing(s.sessions || [], slotAt(tpeNow()).week)));
                 if (er) setErased(parseErasures(parseCSV(er)));
                 if (sn || lg) setSnaps([...(lg ? parseLog(parseCSV(lg)) : []), ...(sn ? parseSnapshots(parseCSV(sn)) : [])].sort((a, b) => b.t - a.t));
                 setVix(parseVix(v));
@@ -506,10 +514,13 @@
             }, []);
             const loadWeek = useCallback(async (w, live) => {
                 const t = Date.now();
-                const [s, d] = await Promise.all([getJSON(`${SERIES_URL(w)}?t=${t}`), getText(live ? `${DEMO_URL}&t=${t}` : DEMO_HISTORY(w))]);
-                setSeries(prev => ({ ...prev, [w]: s }));
+                const [s, d, old] = await Promise.all([getJSON(`${SERIES_URL(w)}?t=${t}`), getText(live ? `${DEMO_URL}&t=${t}` : DEMO_HISTORY(w)),
+                                                       HISTORY_DIR && w < HISTORY_UNTIL ? getJSON(`${HISTORY_DIR}/${w}.json`) : null]);
+                setSeries(prev => ({ ...prev, [w]: s, [`history:${w}`]: old }));
                 let parsed = d ? parseDemo(parseCSV(d), w) : null;
                 if (!parsed && live) { const h = await getText(DEMO_HISTORY(w)); parsed = h ? parseDemo(parseCSV(h), w) : null; }
+                // 補回的週沒有示範帳戶試算表可讀：期指用合約紀錄的（沒有週三、週五時價）
+                if (!parsed && old) parsed = { market: {}, series: old.t.map((ts, k) => ({ t: wallMs(ts), fut: old.fut[k], ba: null, bb: null })) };
                 setDemo(prev => ({ ...prev, [w]: parsed }));
             }, []);
 
@@ -538,15 +549,15 @@
             // 該帳號本週走勢：存檔 + 試算表裡還留著的快照（同一時間以試算表為準）
             const acc = (() => {
                 const map = new Map();
-                const s = series[week];
-                if (s && s.acc && s.acc[name]) {
+                [series[`history:${week}`], series[week]].forEach(s => {
+                    if (!s || !s.acc || !s.acc[name]) return;
                     const a = s.acc[name];
                     s.t.forEach((ts, k) => {
                         if (a.pnl[k] === null) return;
                         const t = wallMs(ts);
                         map.set(t, { t, slot: slotAt(new Date(t)).slot, pnl: a.pnl[k], rate: a.rate[k], base: a.base[k], asset: a.asset[k], pts: a.pts[k], tv: a.tv[k], ratio: a.ratio[k], delta: a.delta[k], margin: a.margin[k] });
                     });
-                }
+                });
                 snaps.filter(x => x.week === week).forEach(x => {
                     const a = x.accounts.find(y => y.name === name);
                     if (a && a.pnl !== null) map.set(x.t, { ...a, t: x.t, slot: x.slot });
@@ -701,7 +712,7 @@
                         </div>
                         <div id="win-strip"><${WinStrip} rows=${rows} selected=${cur} onPick=${pick} /></div>
                         <${SessionTable} rows=${rows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
-                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。<span className="sm:hidden">表格可左右滑動。</span></p>
+                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；沒有週三、週五時價與 VIX，百點震幅是用紀錄裡的期指算的。' : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 
                 </div>`;
