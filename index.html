@@ -73,6 +73,9 @@
         html.m-portrait #page-session td div + div { font-size: 12px !important; line-height: 1.1 !important; }
         html.m-portrait #app-root #total-row td { font-size: 18px !important; }
         html.m-portrait #total-row .total-label { font-size: 13px !important; }
+        html.m-portrait #account-links { gap: 8px !important; margin: 8px 0 0 !important; }
+        html.m-portrait #account-links span, html.m-portrait #account-links a { font-size: 17px !important; }
+        html.m-portrait #account-links a { padding: 8px 12px !important; }
         html.m-portrait #session-panel h2 { font-size: 22px !important; }
         html.m-portrait #session-panel h2 ~ span, html.m-portrait #session-panel label, html.m-portrait #session-panel select { font-size: 15px !important; }
         html.m-portrait #page-session > p { font-size: 14px !important; }
@@ -121,6 +124,11 @@
 
             #app-root #total-row td { font-size: calc(var(--fit-font) + 1px) !important; }
             #total-row .total-label { font-size: 8px !important; margin: 0 !important; }
+
+            /* 表格下方的個別帳號連結：右邊讓開換頁鈕，按鈕夠高才好點 */
+            #account-links { gap: 4px !important; margin: 4px 142px 0 2px !important; }
+            #account-links span { font-size: 10px !important; }
+            #account-links a { min-height: 34px; padding: 0 7px !important; font-size: 11px !important; border-radius: 8px; }
 
             /* 每頁只顯示一張表：第 1 頁總表、第 2 頁每盤績效表、第 3 頁各帳號每盤損益 */
             #session-panel, #page-session, #page-accounts { display: none; }
@@ -183,6 +191,15 @@
         const GID      = '103299629';
         const RANGE    = 'C2:O14';
         const CSV_URL  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}&range=${RANGE}`;
+
+        // 總表帳號名稱連到該帳號那一台的 Chrome 遠端桌面（連結同試算表績效表 B4:B12；CSV 讀不到超連結，機器換了要改這裡）
+        // 放在這一頁、不放 common.js：帳號頁會單獨分享，不要帶到別台的連結
+        const REMOTE_SESSION = {
+            demo: 'f4dd324c-5a64-499d-a53d-b133d65e3b58', kgi: '61cbea15-89e2-caeb-681a-c6f05d0a526b', main: 'dc27f55f-4fa1-79c8-3436-beedaf4ec5c6',
+            gary: 'dc27f55f-4fa1-79c8-3436-beedaf4ec5c6', mtk: 'f4dd324c-5a64-499d-a53d-b133d65e3b58', masterlink: '8efb9e56-5035-10f0-7d87-6be2a33f354a',
+            richdad: 'f125983f-e03b-d7b8-be80-58a13690bb12', rick: 'f125983f-e03b-d7b8-be80-58a13690bb12', mom: '8efb9e56-5035-10f0-7d87-6be2a33f354a'
+        };
+        const remoteUrl = a => REMOTE_SESSION[a.id] ? `https://remotedesktop.google.com/access/session/${REMOTE_SESSION[a.id]}` : accountUrl(a);
 
         const RATIO_EXTREME = 0.30;
         const RATIO_WARNING = 0.35;
@@ -363,7 +380,7 @@
                 else if (isNeg)          cls += "text-red-500";
                 else                     cls += "text-slate-700";
                 const acct = cIdx === 0 && accountOf(cell);
-                if (acct) return html`<td key=${cIdx} className=${cls}><a href=${accountUrl(acct)} title="看這個帳號的獨立績效頁" className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${cell}</a></td>`;
+                if (acct) return html`<td key=${cIdx} className=${cls}><a href=${remoteUrl(acct)} target="_blank" rel="noopener" title="連到這一台的遠端桌面" className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${cell}</a></td>`;
                 return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
             };
 
@@ -460,7 +477,7 @@
                     <div key=${rIdx} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                         <div className="bg-slate-900 px-3 py-1.5 flex justify-between items-center">
                             ${accountOf(row[0])
-                                ? html`<a href=${accountUrl(accountOf(row[0]))} className="text-white font-bold text-xs tracking-tight underline decoration-yellow-400 underline-offset-2">${row[0]} ›</a>`
+                                ? html`<a href=${remoteUrl(accountOf(row[0]))} target="_blank" rel="noopener" className="text-white font-bold text-xs tracking-tight underline decoration-yellow-400 underline-offset-2">${row[0]} ›</a>`
                                 : html`<span className="text-white font-bold text-xs tracking-tight">${row[0]}</span>`}
                             <span className="text-[8px] bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-black shrink-0">#${rIdx + 1}</span>
                         </div>
@@ -503,6 +520,11 @@
                                     <tfoot>${renderTotalRow()}</tfoot>
                                 </table>
                             </div>
+                        </div>
+                        <div id="account-links" className="flex flex-wrap items-center gap-1.5 sm:gap-2 my-2 sm:my-3">
+                            <span className="text-[11px] font-black text-slate-500 mr-1">個別帳號績效</span>
+                            ${accountRows.map(r => accountOf(r[0])).filter(Boolean).map(a => html`
+                                <a key=${a.id} href=${accountUrl(a)} className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-black text-blue-700 shadow-sm hover:bg-blue-50 active:bg-blue-100 whitespace-nowrap">${a.name} ›</a>`)}
                         </div>
                         <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-2">
                             ${renderMobileCards()}

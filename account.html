@@ -101,7 +101,6 @@
 
             /* 頁首：壓成一行 */
             header { display: flex !important; flex-direction: row !important; align-items: center !important; justify-content: space-between !important; padding: 1px 8px !important; gap: 8px !important; }
-            header > a { padding: 3px 8px !important; font-size: 11px !important; white-space: nowrap; }
             header > div:nth-child(2) { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
             header h1 { font-size: 0.9rem !important; line-height: 1.1 !important; white-space: nowrap; }
             header h1 span { font-size: 10px !important; line-height: 1 !important; margin-left: 4px !important; }
@@ -109,7 +108,6 @@
             header > div:nth-child(2) > div > span:first-child { display: none !important; }
             header > div:nth-child(2) button { font-size: 10px !important; padding: 0 8px !important; }
             header > div:last-child { flex: 0 0 auto; flex-direction: row !important; align-items: center !important; gap: 6px !important; }
-            header > div:last-child button { padding: 3px 8px !important; font-size: 10px !important; white-space: nowrap; }
 
             /* 八張統計卡一整排：壓到最扁，數字為主 */
             #stats-row { grid-template-columns: none !important; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px !important; }
@@ -154,12 +152,16 @@
             body.m-page-2 #app-root > *:not(header) { display: none !important; }
             body.m-page-2 #app-root > #page-session { display: block !important; }
 
-            /* 換頁鈕放右下角並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
-            #page-btn { display: inline-flex; align-items: center; justify-content: center; position: fixed; z-index: 60;
-                        right: max(10px, env(safe-area-inset-right)); bottom: calc(max(6px, env(safe-area-inset-bottom)) + 8px);
-                        min-width: 108px; min-height: 44px; padding: 0 14px; border-radius: 12px; background: #1e293b; color: #fff;
-                        font-size: 14px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 10px rgba(15, 23, 42, .35); }
-            #page-btn:active { background: #2563eb; transform: scale(.96); }
+            /* 操作鈕都放最下面並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
+            /* 左下回總表；右下同步數據、換頁；圖表的時間軸和拉桿會讓開（見 PerfChart） */
+            #page-btn, header > a, header > div:last-child button {
+                        display: inline-flex; align-items: center; justify-content: center; position: fixed; z-index: 60;
+                        bottom: calc(max(6px, env(safe-area-inset-bottom)) + 8px);
+                        min-height: 44px; border-radius: 12px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 10px rgba(15, 23, 42, .35); }
+            #page-btn { right: max(10px, env(safe-area-inset-right)); min-width: 108px; padding: 0 14px; background: #1e293b; color: #fff; font-size: 14px; }
+            header > div:last-child button { right: calc(max(10px, env(safe-area-inset-right)) + 114px); width: 104px; padding: 0 !important; font-size: 13px !important; }
+            header > a { left: max(10px, env(safe-area-inset-left)); width: 76px; padding: 0 !important; font-size: 13px !important; align-self: auto !important; }
+            #page-btn:active, header > div:last-child button:active, header > a:active { background: #2563eb; transform: scale(.96); }
         }
     </style>
 </head>
@@ -292,6 +294,8 @@
                 const phone = window.innerWidth < 768 || mPortrait || mLandscape;
                 const fontSize = mPortrait ? 18 : 10;
                 const axisW = mPortrait ? 80 : mLandscape ? 42 : 55;
+                // 橫向：最下面一排是操作鈕（高 44），拉桿夾在中間，時間軸排在這一排上面；按鈕離底的距離含 iPhone 底部安全區，直接量（圖表離螢幕底約 4）
+                const barBottom = mLandscape ? parseFloat(getComputedStyle(document.getElementById('page-btn')).bottom) - 4 : 0;
                 // 手機寬度不夠：每邊只顯示一個軸的刻度（其他線一樣用自己的刻度畫）
                 const usedAxes = phone ? used.filter(k => used.find(x => AXES[x].side === AXES[k].side) === k) : used;
                 const offsetOf = {}, count = { left: 0, right: 0 };
@@ -317,7 +321,7 @@
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
-                    grid: mLandscape ? { left: count.left * axisW + 4, right: count.right * axisW + 4, top: 24, bottom: 52 }
+                    grid: mLandscape ? { left: count.left * axisW + 4, right: count.right * axisW + 4, top: 24, bottom: barBottom + 44 + (wholeWeek ? 32 : 20) }
                         : { left: count.left * axisW + 15, right: count.right * axisW + 15, top: mPortrait ? 44 : 30, bottom: mPortrait ? 110 : 70 },
                     tooltip: { show: !eraser, trigger: 'axis', axisPointer: { type: 'line' }, confine: true, textStyle: { fontSize: mPortrait ? 24 : 14 },
                         formatter: ps => ps.length ? `<b>${mdhm(ps[0].value[0])}</b><br>` + ps.map(p => `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], byName[p.seriesName])}</b>`).join('<br>') : '' },
@@ -335,7 +339,7 @@
                         { type: 'inside', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', disabled: eraser || phone,
                           zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: true },
                         { type: 'slider', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', showDetail: false, brushSelect: false,
-                          ...(mLandscape ? { left: 10, right: 130, bottom: 4, height: 18 } : mPortrait ? { bottom: 10, height: 44 } : { bottom: 8, height: 24 }) }
+                          ...(mLandscape ? { left: 92, right: 236, bottom: barBottom + 13, height: 18 } : mPortrait ? { bottom: 10, height: 44 } : { bottom: 8, height: 24 }) }
                     ],
                     series: lines.map(({ def: s, points: data }) => {
                         const color = s.area ? signFill(data) : s.color;
