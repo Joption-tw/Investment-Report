@@ -2,6 +2,46 @@
 // 改了這個檔，記得把 index.html、account.html 裡 common.js?v= 的版本號一起改掉（瀏覽器會快取這個檔 10 分鐘，新舊版混用會整頁空白）
 const html = htm.bind(React.createElement);
 
+// ===== 可拖曳的浮動按鈕：位置只記在這台裝置；移動超過 8px 才算拖曳，沒超過就是一般點擊 =====
+// 位置寫成一條 CSS 規則，按鈕還沒畫出來或被藏起來也不影響；螢幕轉向、網址列收合時重新算，永遠留在畫面內
+const makeDraggable = (selector, key) => {
+    const storeKey = `ir-drag:${key}`, rule = document.head.appendChild(document.createElement('style'));
+    let pos = null;   // x、y：按鈕中心在可視範圍的比例；w、h：按鈕大小
+    try { pos = JSON.parse(localStorage.getItem(storeKey)); } catch (e) {}
+    const view = () => { const v = window.visualViewport; return v ? { l: v.offsetLeft, t: v.offsetTop, w: v.width, h: v.height } : { l: 0, t: 0, w: innerWidth, h: innerHeight }; };
+    const place = () => {
+        if (!pos) return;
+        const v = view(), fit = (center, size, start, len) => Math.max(start + 4, Math.min(center - size / 2, start + len - size - 4));
+        rule.textContent = `${selector} { left: ${fit(v.l + pos.x * v.w, pos.w, v.l, v.w)}px !important; top: ${fit(v.t + pos.y * v.h, pos.h, v.t, v.h)}px !important; right: auto !important; bottom: auto !important; }`;
+    };
+    place();
+    addEventListener('resize', place);
+    if (window.visualViewport) { visualViewport.addEventListener('resize', place); visualViewport.addEventListener('scroll', place); }
+    document.addEventListener('pointerdown', e => {
+        const el = e.button === 0 && e.target.closest(selector);
+        if (!el) return;
+        const box = el.getBoundingClientRect(), { clientX: startX, clientY: startY } = e;
+        let moved = false;
+        const onMove = ev => {
+            if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+            moved = true;
+            const v = view();
+            pos = { x: (box.left + box.width / 2 + ev.clientX - startX - v.l) / v.w, y: (box.top + box.height / 2 + ev.clientY - startY - v.t) / v.h, w: box.width, h: box.height };
+            place();
+        };
+        const onEnd = () => {
+            removeEventListener('pointermove', onMove); removeEventListener('pointerup', onEnd); removeEventListener('pointercancel', onEnd);
+            if (!moved) return;
+            try { localStorage.setItem(storeKey, JSON.stringify(pos)); } catch (e) {}
+            // 放開時瀏覽器還會補一個 click，不能把它當成按按鈕
+            const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+            document.addEventListener('click', swallow, { capture: true, once: true });
+            setTimeout(() => document.removeEventListener('click', swallow, true), 300);
+        };
+        addEventListener('pointermove', onMove); addEventListener('pointerup', onEnd); addEventListener('pointercancel', onEnd);
+    });
+};
+
 // ===== 資料來源 =====
 // 收完的盤：GitHub Actions（scripts/record_sessions.py）存到 data/sessions.json；各帳號走勢存到 data/series/<週>.json
 // 即時：試算表「績效表」上方總表 + 下方每 10 分鐘的快照（約保留 16 小時）

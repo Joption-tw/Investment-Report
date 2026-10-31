@@ -37,7 +37,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="common.js?v=20261031b"></script>
+    <script src="common.js?v=20261031c"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -147,7 +147,10 @@
         #page-nav button { width: 48px; height: 44px; color: #fff; font-size: 15px; font-weight: 900; border-radius: 12px; cursor: pointer; }
         #page-nav button:hover { background: #334155; }
         #page-nav button:active { background: #2563eb; }
-        #page-nav button:disabled { color: #64748b; background: none; cursor: default; }
+        #page-nav button:disabled { color: #64748b; background: none; cursor: default; pointer-events: none; }
+        /* 換頁鈕、走勢圖鈕可以拖到別的位置（makeDraggable），才不會一直擋到後面的按鈕 */
+        #page-nav, #trend-btn { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+        #page-nav button { touch-action: none; }
 
         /* ===== 手機直向：三張表排成一頁，字放大 ===== */
         html.m-portrait #rotate-hint { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 8px 8px 0; padding: 10px 16px; border-radius: 14px;
@@ -307,6 +310,8 @@
     </div>
     <script>
         // 換頁：電腦與手機橫向分三頁（手機直向整份一頁，CSS 不看這個 class）
+        makeDraggable('#page-nav', 'page-nav');
+        makeDraggable('#trend-btn', 'trend-btn');
         let mobilePage = 1;
         function setMobilePage(n) {
             mobilePage = n;

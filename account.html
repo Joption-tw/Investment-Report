@@ -38,7 +38,7 @@
     <script src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
-    <script src="common.js?v=20261031b"></script>
+    <script src="common.js?v=20261031c"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         html, body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
@@ -77,6 +77,8 @@
                     box-shadow: 0 2px 10px rgba(15, 23, 42, .35); cursor: pointer; }
         #page-btn:hover { background: #334155; }
         #page-btn:active { background: #2563eb; transform: scale(.96); }
+        /* 換頁鈕可以拖到別的位置（makeDraggable），才不會一直擋到後面的按鈕 */
+        #page-btn { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 
         /* ===== 手機直向：整份一頁（圖表撐滿剩餘高度），字放大 ===== */
         html.m-portrait #app-root { min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; padding: 6px !important; }
@@ -188,6 +190,7 @@
         // 走勢：該帳號每 2 分鐘的「兩分鐘紀錄」＋績效表每 10 分鐘的快照（試算表只留最近的，更早的由 GitHub Actions 存到 data/series/<週>.json）
         //       期指 / 週三、週五時價取自示範帳戶試算表（每 2 分鐘）
         // 換頁：電腦與手機橫向分兩頁（手機直向整份一頁，CSS 不看這個 class）；回到第 1 頁時圖表要重新量尺寸（藏起來時量不到）
+        makeDraggable('#page-btn', 'page-btn');
         let mobilePage = 1;
         function setMobilePage(n) {
             mobilePage = n;
@@ -318,7 +321,8 @@
                 const fontSize = mPortrait ? 18 : 10;
                 const axisW = mPortrait ? 80 : mLandscape ? 42 : 55;
                 // 橫向：最下面一排是操作鈕（高 44），拉桿夾在中間，時間軸排在這一排上面；按鈕離底的距離含 iPhone 底部安全區，直接量（圖表離螢幕底約 4）
-                const barBottom = mLandscape ? parseFloat(getComputedStyle(document.getElementById('page-btn')).bottom) - 4 : 0;
+                // 量同步數據鈕，不量換頁鈕：換頁鈕可能被拖走
+                const barBottom = mLandscape ? parseFloat(getComputedStyle(document.querySelector('header > div:last-child button')).bottom) - 4 : 0;
                 // 手機寬度不夠：每邊只顯示一個軸的刻度（其他線一樣用自己的刻度畫）
                 const usedAxes = phone ? used.filter(k => used.find(x => AXES[x].side === AXES[k].side) === k) : used;
                 const offsetOf = {}, count = { left: 0, right: 0 };
