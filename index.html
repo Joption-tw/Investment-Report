@@ -57,6 +57,7 @@
         .hl-label { margin-bottom: 6px; color: #cbd5e1; font-size: 13px; font-weight: 700; line-height: 1; white-space: nowrap; }
         .hl-tv { color: #fde047; font-size: 34px; font-weight: 900; line-height: 1; }
         .hl-fut { color: #fff; font-size: 22px; font-weight: 700; line-height: 1; }
+        .hl-vix { color: #7dd3fc; font-size: 22px; font-weight: 700; line-height: 1; }
         .hl-chg { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; line-height: 1; }
         .hl-pts { font-size: 30px; font-weight: 900; }
         .hl-pct { font-size: 20px; font-weight: 700; }
@@ -108,7 +109,11 @@
             .hl-cell { padding: 6px 4px; }
             .hl-label { margin-bottom: 4px; font-size: 11px; }
             .hl-tv { font-size: 24px; }
-            .hl-fut { font-size: 15px; }
+            .hl-fut, .hl-vix { font-size: 15px; }
+            .hl-stats { flex-wrap: wrap; }
+            .hl-stats > .hl-btn { flex: 1 1 30%; }
+            .hl-stats > .hl-chg-cell { order: 5; flex: 1 1 100%; flex-direction: row; gap: 8px; }
+            .hl-stats > .hl-chg-cell .hl-label { margin: 0; }
             .hl-chg { gap: 4px; }
             .hl-pts { font-size: 19px; }
             .hl-pct { font-size: 12px; }
@@ -155,7 +160,12 @@
         html.m-portrait header .divide-x > * { flex: 1 1 auto !important; }
         html.m-portrait header .hl-label { margin-bottom: 10px; font-size: 22px !important; }
         html.m-portrait header .hl-tv { font-size: 68px !important; }
-        html.m-portrait header .hl-fut { font-size: 40px !important; }
+        html.m-portrait header .hl-fut, html.m-portrait header .hl-vix { font-size: 40px !important; }
+        html.m-portrait header .hl-stats { flex-wrap: wrap; }
+        html.m-portrait header .hl-stats > .hl-btn { flex: 1 1 30% !important; }
+        html.m-portrait header .hl-stats > .hl-chg-cell { order: 5; flex: 1 1 70% !important; flex-direction: row; gap: 20px; border-top: 1px solid #1e293b; }
+        html.m-portrait header .hl-stats > .hl-chg-cell .hl-label { margin: 0; }
+        html.m-portrait header .hl-stats > .hl-refresh { order: 6; flex: 1 1 10% !important; border-top: 1px solid #1e293b; }
         html.m-portrait header .hl-pts { font-size: 58px !important; }
         html.m-portrait header .hl-pct { font-size: 36px !important; }
         html.m-portrait header .hl-body { flex-direction: column; gap: 10px; width: 100%; }
@@ -207,7 +217,8 @@
             header .divide-x span { margin: 0 !important; }
             header .hl-label { font-size: 9px; }
             header .hl-tv { font-size: 20px; }
-            header .hl-fut { font-size: 13px; }
+            header .hl-fut, header .hl-vix { font-size: 13px; }
+            header .hl-stats { flex-wrap: nowrap; }
             header .hl-chg { gap: 3px; }
             header .hl-pts { font-size: 18px; }
             header .hl-pct { font-size: 12px; }
@@ -265,9 +276,14 @@
             .tr-controls { order: 3; flex-wrap: nowrap; padding: 4px 10px calc(max(4px, env(safe-area-inset-bottom))); border-top: 1px solid #e2e8f0; border-bottom: 0; }
             .tr-tab, .tr-close { min-height: 40px; }
         }
-        /* 較窄的橫向手機放不下更新時間，讓給重點數字；再窄就連微型走勢也收起來 */
-        @media (orientation: landscape) and (max-height: 600px) and (max-width: 760px) {
+        /* 手機橫向放不下更新時間，讓給重點數字；較窄的連標題也收起來，再窄就連微型走勢也收起來 */
+        @media (orientation: landscape) and (max-height: 600px) {
             header > div:first-child { display: none !important; }
+        }
+        @media (orientation: landscape) and (max-height: 600px) and (max-width: 860px) {
+            header .px-4.py-3 { display: none !important; }
+            header .hl-stats { flex: 1 1 auto; }
+            header .hl-stats > * { flex: 1 1 auto !important; justify-content: center; }
         }
         @media (orientation: landscape) and (max-height: 600px) and (max-width: 620px) {
             header .hl-spark { display: none; }
@@ -363,8 +379,9 @@
 
         // ===== 時間價值、期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列（頁首的數字也是這一列）=====
         const TREND_METRICS = {
-            tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4 },
-            fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3 }
+            tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '每 2 分鐘一筆，已濾掉資料跳點，可能和即時數字略有差距' },
+            fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '每 2 分鐘一筆，已濾掉資料跳點，可能和即時數字略有差距' },
+            vix: { label: '波動率',   color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數，只有日盤；夜盤顯示最近一個日盤' }
         };
         const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
                                  + `&tq=${encodeURIComponent(`select A,F,K where B starts with '示範帳號' and A >= '${since}'`)}&t=${Date.now()}`;
@@ -389,7 +406,7 @@
             pts.forEach(p => { const k = sessionKey(p); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
             groups.forEach(g => {
                 dropStale(g);
-                Object.keys(TREND_METRICS).forEach(key => {
+                ['tv', 'fut'].forEach(key => {
                     const clean = medianIn(g, key, TREND_METRICS[key].win);
                     g.forEach((p, i) => { p[key] = clean[i]; });
                 });
@@ -401,7 +418,30 @@
             if (!r.ok) throw new Error('無法讀取走勢');
             return parseTrend(parseCSV(await r.text()));
         };
-        const fmtTrend = v => v === null || v === undefined ? '—' : Math.round(v).toLocaleString();
+        const fmtTrend = (v, d) => v === null || v === undefined ? '—' : d ? v.toFixed(d) : Math.round(v).toLocaleString();
+
+        // 波動率：期交所每 15 秒一筆、只有日盤；畫圖每 2 分鐘取一筆（最後一筆一定留著）
+        const parseVixTicks = (v) => {
+            if (!v || !v.tradeDay || !v.ticks) return [];
+            const day = `${v.tradeDay.slice(0, 4)}-${v.tradeDay.slice(4, 6)}-${v.tradeDay.slice(6, 8)}`;
+            const ticks = v.ticks.map(([t, x]) => [String(t).padStart(6, '0'), x]).filter(([t]) => t <= '134500');
+            return ticks.filter((_, i) => i % 8 === 0 || i === ticks.length - 1).map(([t, x]) => {
+                const ms = wallMs(`${day} ${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}`);
+                return { t: ms, vix: x, ...slotAt(new Date(ms)) };
+            });
+        };
+        const fetchVix = (date) => fetch(date ? `${VIX_URL}?date=${date}` : VIX_URL).then(r => r.ok ? r.json() : null).catch(() => null);
+        // 本週每個日盤；今天用即時的。週三夜盤剛換週、還沒有日盤時用最近一個日盤
+        const fetchVixWeek = async (week) => {
+            const today = ymd(tpeNow());
+            const dates = SLOT_DEFS.filter(d => d.type === 'D').map(d => addDays(week, d.off)).filter(d => d < today);
+            const [now, ...past] = await Promise.all([fetchVix(), ...dates.map(d => fetchVix(d.replace(/-/g, '')))]);
+            const latest = parseVixTicks(now);
+            const seen = new Set(latest.length ? [sessionKey(latest[0])] : []);
+            const rows = past.map(parseVixTicks).filter(r => r.length && !seen.has(sessionKey(r[0]))).flat();
+            const all = [...rows, ...latest].filter(p => p.week === week).sort((a, b) => a.t - b.t);
+            return all.length ? all : latest;
+        };
 
         // 走勢圖的 ECharts 第一次放大才載入，平常開總表不用多下載
         let echartsLoading = null;
@@ -458,7 +498,7 @@
                     else if (newSession || hhmm(prev.t).slice(0, 2) !== hhmm(p.t).slice(0, 2)) labels[line.length] = hhmm(p.t);
                     line.push(p);
                 });
-                const peak = (type, color, position, offset) => ({ type, label: { color, position, offset, fontWeight: 'bold', formatter: p => fmtTrend(p.value) } });
+                const peak = (type, color, position, offset) => ({ type, label: { color, position, offset, fontWeight: 'bold', formatter: p => fmtTrend(p.value, m.d) } });
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
@@ -468,7 +508,7 @@
                     tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, confine: true, textStyle: { fontSize: mPortrait ? 30 : 14 },
                         formatter: ps => {
                             const p = ps[0] && line[ps[0].dataIndex];
-                            return p && p.t !== null ? `<b>${mdhm(p.t)}</b> ${SLOT_DEFS[p.slot].label}<br>${ps[0].marker}${m.label}：<b>${fmtTrend(p[metric])}</b>` : '';
+                            return p && p.t !== null ? `<b>${mdhm(p.t)}</b> ${SLOT_DEFS[p.slot].label}<br>${ps[0].marker}${m.label}：<b>${fmtTrend(p[metric], m.d)}</b>` : '';
                         } },
                     xAxis: { type: 'category', boundaryGap: false, data: line.map((_, i) => i), axisTick: { show: false },
                         axisLine: { lineStyle: { color: '#cbd5e1' } },
@@ -491,6 +531,7 @@
             const [metric, setMetric] = useState(initial);
             const [range, setRange]   = useState('session');   // session = 當盤、week = 本週
             const [pts, setPts]       = useState(null);
+            const [vixPts, setVixPts] = useState(null);
             const [failed, setFailed] = useState(null);
             const [ready, setReady]   = useState(!!window.echarts);
             useEffect(() => { loadEcharts().then(() => setReady(true), e => setFailed(e.message)); }, []);
@@ -498,6 +539,7 @@
                 const load = () => {
                     const { week } = slotAt(tpeNow());
                     fetchTrend(slotOpen(week, 0)).then(p => { setPts(p.filter(x => x.week === week)); setFailed(null); }, e => setFailed(e.message));
+                    fetchVixWeek(week).then(setVixPts);
                 };
                 load();
                 const timer = setInterval(load, 120000);
@@ -509,10 +551,11 @@
                 return () => window.removeEventListener('keydown', onKey);
             }, [onClose]);
 
-            const last = pts && pts.length ? pts[pts.length - 1] : null;
-            const rows = !last ? [] : range === 'week' ? pts : pts.filter(p => sessionKey(p) === sessionKey(last));
+            const source = metric === 'vix' ? vixPts : pts;
+            const last = source && source.length ? source[source.length - 1] : null;
+            const rows = !last ? [] : range === 'week' ? source : source.filter(p => sessionKey(p) === sessionKey(last));
             const sub = !last ? '' : range === 'week' ? `本週 ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}` : `${SLOT_DEFS[last.slot].label} ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}`;
-            const msg = failed ? `${failed}，稍後再試` : !pts || !ready ? '載入中…' : !rows.length ? '這一週還沒有走勢資料' : null;
+            const msg = failed && metric !== 'vix' ? `${failed}，稍後再試` : !source || !ready ? '載入中…' : !rows.length ? '這一週還沒有走勢資料' : null;
             const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
 
             return ReactDOM.createPortal(html`
@@ -522,7 +565,7 @@
                             <span className="tr-title">${TREND_METRICS[metric].label}</span>
                             <span className="tr-value font-mono-data">${current[metric]}</span>
                             <span className="tr-sub">${sub}</span>
-                            <span className="tr-note">每 2 分鐘一筆，已濾掉資料跳點，可能和即時數字略有差距</span>
+                            <span className="tr-note">${TREND_METRICS[metric].note}</span>
                         </div>
                         <div className="tr-controls">
                             <div className="tr-group">${Object.keys(TREND_METRICS).map(k => tab(metric === k, TREND_METRICS[k].label, () => setMetric(k)))}</div>
@@ -566,6 +609,7 @@
             const [live, setLive]               = useState(null);
             // 頁首微型走勢（當盤）；trendKey = 目前放大的是哪一張圖
             const [trend, setTrend]             = useState([]);
+            const [vixDay, setVixDay]           = useState([]);
             const [trendKey, setTrendKey]       = useState(null);
             const closeTrend = useCallback(() => setTrendKey(null), []);
 
@@ -576,6 +620,12 @@
                 };
                 load();
                 const timer = setInterval(load, 120000);
+                return () => clearInterval(timer);
+            }, []);
+            useEffect(() => {
+                const load = () => fetchVix().then(v => { const r = parseVixTicks(v); if (r.length) setVixDay(r); });
+                load();
+                const timer = setInterval(load, 60000);
                 return () => clearInterval(timer);
             }, []);
 
@@ -846,23 +896,25 @@
             const pointsChangeFormatted = pointsChangeNum > 0 ? '+' + topStats.pointsChange : topStats.pointsChange;
             const trendCell = (key, value, valueClass) => html`
                 <button type="button" key=${key} onClick=${() => setTrendKey(key)} title=${`放大${TREND_METRICS[key].label}走勢圖`}
-                        className="hl-cell hl-btn flex-1 lg:flex-none flex flex-col items-center justify-center text-center">
+                        className="hl-cell hl-btn flex-1 xl:flex-none flex flex-col items-center justify-center text-center">
                     <span className="hl-label">${TREND_METRICS[key].label} ›</span>
                     <span className="hl-body">
                         <span className=${valueClass + " font-mono-data"}>${value}</span>
-                        <${Sparkline} values=${trend.map(p => p[key])} color=${TREND_METRICS[key].spark} />
+                        <${Sparkline} values=${(key === 'vix' ? vixDay : trend).map(p => p[key])} color=${TREND_METRICS[key].spark} />
                     </span>
                 </button>`;
+            const vixValue = vixDay.length ? vixDay[vixDay.length - 1].vix.toFixed(2) : '--';
             const statCells = html`
                 ${trendCell('tv', topStats.timeValue, 'hl-tv')}
                 ${trendCell('fut', topStats.futureIndex, 'hl-fut')}
-                <div className=${"hl-cell flex-1 lg:flex-none flex flex-col items-center justify-center text-center " + (pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '')}>
+                <div className=${"hl-cell hl-chg-cell flex-1 xl:flex-none flex flex-col items-center justify-center text-center " + (pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '')}>
                     <span className="hl-label">漲跌</span>
                     <div className="hl-chg font-mono-data">
                         <span className="hl-pts">${pointsChangeFormatted}</span>
                         <span className="hl-pct">(${topStats.percentChange})</span>
                     </div>
-                </div>`;
+                </div>
+                ${trendCell('vix', vixValue, 'hl-vix')}`;
 
             return html`
                 <div id="app-root" className="flex flex-col min-h-screen bg-slate-50 select-none overflow-x-hidden">
@@ -878,11 +930,11 @@
                                 <div className="text-[10px] font-mono-data font-bold text-slate-300">${formatTime(currentTime)}</div>
                             </div>
                         </div>
-                        <div className="flex flex-col lg:flex-row lg:items-stretch">
+                        <div className="flex flex-col xl:flex-row xl:items-stretch">
                             <div className="bg-yellow-400 text-slate-900 px-4 py-3 md:py-4 flex-1 flex items-center">
                                 <h1 className="text-xl md:text-2xl font-black italic tracking-tighter uppercase">歐大的投資報表</h1>
                             </div>
-                            <div className="flex divide-x divide-slate-800 bg-slate-900 border-t border-slate-800 lg:border-t-0">
+                            <div className="hl-stats flex divide-x divide-slate-800 bg-slate-900 border-t border-slate-800 xl:border-t-0">
                                 ${statCells}
                                 <button onClick=${handleManualRefresh} disabled=${refreshing} className="hl-refresh px-4 py-1.5 flex flex-col items-center justify-center text-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer">
                                     <span className=${"text-base leading-none " + (refreshing ? 'animate-spin inline-block' : '')}>↻</span>
@@ -906,7 +958,7 @@
                                     <button onClick=${handleManualRefresh} disabled=${refreshing} className=${"text-slate-400 hover:text-white disabled:opacity-40 text-sm leading-none cursor-pointer " + (refreshing ? 'animate-spin inline-block' : '')}>↻</button>
                                 </div>
                             </div>
-                            <div className="flex divide-x divide-slate-800 bg-slate-900 overflow-hidden border-b border-slate-800 shadow-md">
+                            <div className="hl-stats flex divide-x divide-slate-800 bg-slate-900 overflow-hidden border-b border-slate-800 shadow-md">
                                 ${statCells}
                             </div>
                         </div>
@@ -922,7 +974,7 @@
                     </main>
                     <${SessionPanel} sessions=${sessions} live=${live} />
                     <button type="button" id="trend-btn" onClick=${() => setTrendKey('tv')}>走勢圖</button>
-                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: topStats.timeValue, fut: topStats.futureIndex }} onClose=${closeTrend} />`}
+                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: topStats.timeValue, fut: topStats.futureIndex, vix: vixValue }} onClose=${closeTrend} />`}
                 </div>`;
         };
 

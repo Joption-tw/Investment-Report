@@ -1,11 +1,21 @@
 // 示範帳號歷史：下單程式 conf 裡的合約紀錄（台選*.csv，每 2 分鐘一筆）→ 網站的每週存檔
-// 在 repo 根目錄執行：deno run --allow-read --allow-write scripts/import_demo_history.ts <合約紀錄資料夾> data/demo-history（不給輸出資料夾 = 只驗算）
+// 在 repo 根目錄執行：deno run --allow-read --allow-write --allow-net scripts/import_demo_history.ts <合約紀錄資料夾> data/demo-history（不給輸出資料夾 = 只驗算）
 // 網站本身的存檔（data/sessions.json、data/series）從 2026-10-28 才有，這裡補更早的；同一盤以網站存檔為準
+// 週三、週五時價：示範帳戶試算表「資料暫存區」每週一欄（欄名沒有日期，下方 BA_COLS / BB_COLS 是用合約紀錄比對出來的）；
+//                 沒有的週用合約紀錄的時間價值，但紀錄只有當時交易的那一檔（週三夜盤~週五早盤是週五選、週五夜盤~下週三是週三選）
+// VIX：期交所每月每日收盤檔（只公開近幾個月，更早的已下架）
 const [SRC = 'raw', OUT = ''] = Deno.args;
 const SITE = 'data';
 const FROM_WEEK = '2025-12-31';      // 第一個含 2026 年交易日的週
 const LAST_WEEK = '2026-10-21';      // 10-28 週起網站自己有完整紀錄
 const NAME = '示範帳號';
+const BASE = 1000000;                // 起始資產一律 100 萬，跟試算表「2026歷史績效」同一個算法（沒重設的週也是）
+const DEMO_SHEET = '1AsY4_MJipaMp_cNLpyeXTpFGnG0FD4vWJu-SDRdvtME', STASH_GID = '1161313889';
+// 資料暫存區：欄 → 該合約格線的開始日（週三選：該週週三；週五選：前一個週五）
+// 不用的欄：65、72、77 是下一欄的部分重複；19、71 跟合約紀錄差將近一倍，來源不明
+const BA_COLS: Record<number, string> = { 3: '2026-02-25', 4: '2026-03-04', 5: '2026-03-11', 6: '2026-03-18', 7: '2026-03-25', 8: '2026-04-01', 9: '2026-04-08', 10: '2026-04-15', 11: '2026-04-29', 12: '2026-05-06', 13: '2026-05-13', 14: '2026-05-20', 15: '2026-05-27', 16: '2026-06-03', 17: '2026-06-10', 18: '2026-06-17', 20: '2026-07-01', 21: '2026-07-08', 22: '2026-07-15', 23: '2026-07-22', 24: '2026-07-29', 25: '2026-08-05', 26: '2026-08-12', 27: '2026-08-19', 28: '2026-08-26', 29: '2026-09-02', 30: '2026-09-09', 31: '2026-09-16', 32: '2026-09-23', 33: '2026-09-30', 34: '2026-10-07', 35: '2026-10-14', 36: '2026-10-21', 1: '2026-10-28' };
+const BB_COLS: Record<number, string> = { 56: '2026-03-06', 57: '2026-03-13', 58: '2026-03-20', 59: '2026-03-27', 60: '2026-04-03', 61: '2026-04-10', 62: '2026-04-17', 63: '2026-04-24', 64: '2026-05-01', 66: '2026-05-15', 67: '2026-05-22', 68: '2026-05-29', 69: '2026-06-05', 70: '2026-06-12', 73: '2026-07-03', 74: '2026-07-10', 75: '2026-07-17', 76: '2026-07-24', 78: '2026-07-31', 79: '2026-08-07', 80: '2026-08-14', 81: '2026-08-21', 82: '2026-08-28', 83: '2026-09-04', 84: '2026-09-11', 85: '2026-09-18', 86: '2026-09-25', 87: '2026-10-02', 88: '2026-10-09', 89: '2026-10-16', 90: '2026-10-23' };
+const VIX_MONTHS = ['202607', '202608', '202609', '202610'];
 
 const num = (s: string) => { const v = parseFloat(String(s ?? '').replace(/,/g, '')); return isFinite(v) ? v : null; };
 const addDays = (s: string, n: number) => new Date(Date.parse(s + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
@@ -41,6 +51,50 @@ function swing100(prices: number[], threshold = 100) {
   return Math.round(total);
 }
 
+const parseCSV = (text: string) => { const rows: string[][] = []; let row: string[] = [], cur = '', q = false; for (let i = 0; i < text.length; i++) { const c = text[i]; if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; } else if (c === '"') q = true; else if (c === ',') { row.push(cur); cur = ''; } else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; } else cur += c; } if (cur || row.length) { row.push(cur); rows.push(row); } return rows; };
+// 時價變動（同 common.js 的 lastChg）
+const lastChg = (vals: (number | null)[], d = 0) => {
+  const v = vals.filter(x => x) as number[];
+  if (!v.length) return null;
+  const chg = v.at(-1)! - v[0];
+  return { last: +v.at(-1)!.toFixed(d), chg: +chg.toFixed(d), pct: +(v[0] ? chg / v[0] * 100 : 0).toFixed(2), many: v.length > 1 };
+};
+
+// ---- 資料暫存區 → 絕對時間（牆上時間 ms）對應時價
+const stash = parseCSV(await (await fetch(`https://docs.google.com/spreadsheets/d/${DEMO_SHEET}/export?format=csv&gid=${STASH_GID}`)).text());
+const WD: Record<string, number> = { 日: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+const gridOf = (labelCol: number) => { let day = 0, prev: number | null = null; return stash.slice(1).map(r => { const m = String(r[labelCol] || '').match(/^([一二三四五六日])\s*(\d{1,2}):(\d{2})/); if (!m) return null; const wd = WD[m[1]]; if (prev !== null && wd !== prev) day += (wd - prev + 7) % 7; prev = wd; return day * 1440 + +m[2] * 60 + +m[3]; }); };
+const toMap = (cols: Record<number, string>, grid: (number | null)[]) => {
+  const out = new Map<number, number>();
+  for (const [col, start] of Object.entries(cols)) {
+    const base = Date.parse(start + 'T00:00:00Z');
+    stash.slice(1).forEach((r, i) => { const v = num(r[+col]), o = grid[i]; if (v !== null && v > 0 && o !== null) out.set(base + o * 60000, v); });
+  }
+  return out;
+};
+const sheetBA = toMap(BA_COLS, gridOf(0)), sheetBB = toMap(BB_COLS, gridOf(53));
+// 試算表的時間標籤比實際晚 2 分鐘（同 common.js 的 FUT_LAG）；每筆紀錄找最接近的一格
+const fromSheet = (m: Map<number, number>, t: number) => { for (const d of [2, 1, 3, 4, 0]) { const v = m.get(t + d * 60000); if (v !== undefined) return v; } return null; };
+
+// ---- 期交所每日收盤
+const vixDaily = new Map<string, { last: number; chg: number; pct: number; many: boolean }>();
+{
+  let prev: number | null = null;
+  for (const ym of VIX_MONTHS) {
+    const res = await fetch(`https://www.taifex.com.tw/file/taifex/Dailydownload/vix/log2data/${ym}new.txt`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const txt = new TextDecoder('big5').decode(await res.arrayBuffer());
+    for (const l of txt.split(/\r?\n/)) {
+      const c = l.trim().split(/\s+/);
+      if (!/^\d{8}$/.test(c[0] || '') || !isFinite(+c[2])) continue;
+      const v = +c[2], date = `${c[0].slice(0, 4)}-${c[0].slice(4, 6)}-${c[0].slice(6, 8)}`;
+      vixDaily.set(date, prev ? { last: v, chg: +(v - prev).toFixed(2), pct: +((v - prev) / prev * 100).toFixed(2), many: true } : { last: v, chg: 0, pct: 0, many: false });
+      prev = v;
+    }
+  }
+  const ds = [...vixDaily.keys()].sort();
+  console.log(`VIX 每日收盤 ${ds.length} 天：${ds[0]} ~ ${ds.at(-1)}`);
+}
+
 // ---- 讀檔：「價平和:1,067.00」的千分位逗號沒加引號，後面的欄位會多一格；有些列還多一個逗號（見下方統計）
 const raw: any[] = [];
 const names: string[] = [];
@@ -53,7 +107,7 @@ for (const name of names.sort()) {
     if (!/^\d{4}\/\d{2}\/\d{2}$/.test(c[0]) || !/^\d{1,2}:\d{2}$/.test(c[1])) { badRows++; continue; }
     const q = c[10].startsWith('價平和:') && /^\d{3}(\.\d+)?$/.test(c[11]) ? 12 : 11;   // 結算日這格是 0，不是 價平和:
     const t = Date.parse(`${c[0].replace(/\//g, '-')}T${c[1].padStart(5, '0')}:00Z`);
-    raw.push({ f: name, t, pts: num(c[7]), ratio: num(c[8]), tv: num(c[9]), asset: num(c[q]), fut: num(c[q + 1]), margin: num(c[q + 2]), fee: num(c[q + 3]), delta: num(c[q + 6]) });
+    raw.push({ f: name, kind: name.startsWith('台選週五') ? 'F' : 'W', t, pts: num(c[7]), ratio: num(c[8]), tv: num(c[9]), asset: num(c[q]), fut: num(c[q + 1]), margin: num(c[q + 2]), fee: num(c[q + 3]), delta: num(c[q + 6]) });
   }
 }
 // 帳戶總值 0 / 期指 0 是剛啟動還沒讀到；其餘範圍外的是錯位或亂碼，都不要
@@ -88,12 +142,13 @@ function resolveOverlap(rows: any[]) {
 
 // ---- 每週：起始資產 = 週三夜盤重設後的 1,000,000；那週沒重設就用該週第一筆（照常接著算）
 const weekSessions: any[] = [], weekSeries = new Map<string, any[]>(), report: string[] = [], closedSlots: string[] = [];
+const srcCount = { sheetBA: 0, logBA: 0, sheetBB: 0, logBB: 0 };
 for (const week of [...weeks.keys()].sort()) {
   if (week < FROM_WEEK || week > '2026-10-28') continue;
   const slotMap = weeks.get(week)!;
   const allRows = [...slotMap.values()].flat().sort((a, b) => a.t - b.t);
-  const hasReset = allRows.some(r => r.asset === 1000000);
-  const base = hasReset ? 1000000 : allRows[0].asset;
+  const hasReset = allRows.some(r => r.asset === BASE);
+  const base = BASE;
   const kept: any[] = [];
   for (let slot = 0; slot < 10; slot++) {
     const rows0 = slotMap.get(slot);
@@ -104,6 +159,30 @@ for (const week of [...weeks.keys()].sort()) {
     if (distinct < 5) { closedSlots.push(`${week}#${slot}(${rows.length}筆/${distinct})`); continue; }
     const seen = new Set<number>();
     const uniq = rows.filter(r => { if (seen.has(r.t)) return false; seen.add(r.t); return true; });
+    // 週三、週五時價：試算表優先；沒有的用合約紀錄（報價卡住的時段不算，再用中位數濾掉跳點）
+    for (let i = 0, j; i < uniq.length; i = j) {
+      for (j = i + 1; j < uniq.length && uniq[j].fut === uniq[i].fut; j++);
+      if (j - i >= 5) for (let k = i; k < j; k++) uniq[k].frozen = true;
+    }
+    const clean = (kind: string) => uniq.map((r, i) => { const v = uniq.slice(Math.max(0, i - 4), i + 5).filter(x => !x.frozen && x.tv && x.kind === kind).map(x => x.tv).sort((a, b) => a - b); return r.frozen || r.kind !== kind || !v.length ? null : v[v.length >> 1]; });
+    const logBA = clean('W'), logBB = clean('F');
+    // 試算表整段不動（機器沒更新，例：10/23~10/26 一直 39,090）= 沒資料；單筆跳點（例：收盤前 30,110 跳 35,452）用前後 2 筆的中位數濾掉
+    const sheetSeries = (m: Map<number, number>) => {
+      const v = uniq.map(r => fromSheet(m, r.t));
+      for (let i = 0, j; i < v.length; i = j) {
+        for (j = i + 1; j < v.length && v[j] === v[i]; j++);
+        if (v[i] !== null && j - i >= 10) for (let k = i; k < j; k++) v[k] = null;
+      }
+      return v;
+    };
+    const smooth = (v: (number | null)[]) => v.map((x, i) => { if (x === null) return null; const w = v.slice(Math.max(0, i - 2), i + 3).filter(y => y !== null).sort((a: any, b: any) => a - b) as number[]; return w[w.length >> 1]; });
+    const sBA = sheetSeries(sheetBA), sBB = sheetSeries(sheetBB);
+    const ba = smooth(sBA.map((x, i) => x ?? logBA[i])), bb = smooth(sBB.map((x, i) => x ?? logBB[i]));
+    uniq.forEach((r, i) => {
+      r.ba = ba[i]; r.bb = bb[i];
+      if (sBA[i] !== null) srcCount.sheetBA++; else if (logBA[i] !== null) srcCount.logBA++;
+      if (sBB[i] !== null) srcCount.sheetBB++; else if (logBB[i] !== null) srcCount.logBB++;
+    });
     const last = uniq.at(-1), first = uniq[0];
     const date = addDays(week, SLOTS[slot][0]);
     weekSessions.push({
@@ -112,16 +191,19 @@ for (const week of [...weeks.keys()].sort()) {
       total: { pnl: Math.round(last.asset - base), personal: null, base, resetBase: week },
       accounts: [{ name: NAME, pnl: Math.round(last.asset - base), base }],
       open: { at: new Date(first.t).toISOString().slice(0, 19).replace('T', ' '), total: Math.round(first.asset - base), accounts: { [NAME]: Math.round(first.asset - base) } },
-      market: { swing: swing100(uniq.map(r => r.fut)) }
+      market: { swing: swing100(uniq.map(r => r.fut)), ba: lastChg(uniq.map(r => r.ba)), bb: lastChg(uniq.map(r => r.bb)), ...(SLOTS[slot][1] === 'D' && vixDaily.has(date) ? { vix: vixDaily.get(date) } : {}) }
     });
     uniq.forEach(r => kept.push({ ...r, base }));
   }
   weekSeries.set(week, kept);
-  report.push(`${week} base ${base}${hasReset ? '' : '(未重設)'} 盤 ${weekSessions.filter(s => s.week === week).map(s => s.slot).join('')} 筆 ${kept.length}`);
+  report.push(`${week} ${hasReset ? '' : '(未重設) '}盤 ${weekSessions.filter(s => s.week === week).map(s => s.slot).join('')} 筆 ${kept.length}`);
 }
 console.log(report.join('\n'));
 console.log('視為休市的盤：', closedSlots.join(' '));
 
+console.log('時價來源（筆）', JSON.stringify(srcCount));
+const weekCover = [...new Set(weekSessions.map(s => s.week))].map(w => { const ss = weekSessions.filter(s => s.week === w); return `${w.slice(5)} BA${ss.filter(s => s.market.ba).length}/BB${ss.filter(s => s.market.bb).length}/V${ss.filter(s => s.market.vix).length}/盤${ss.length}`; });
+console.log(weekCover.join('  '));
 // ---- 驗算：跟網站已有的盤對答案
 const site = JSON.parse(await Deno.readTextFile(`${SITE}/sessions.json`)).sessions;
 let okCnt = 0;
@@ -131,6 +213,7 @@ for (const s of site) {
   const a = s.accounts.find((x: any) => x.name === NAME);
   const same = mine && a && Math.abs(mine.accounts[0].pnl - a.pnl) <= 300;
   if (same) okCnt++;
+  console.log(`   BA 網站 ${s.market?.ba?.last ?? '-'} 轉換 ${mine?.market.ba?.last ?? '-'} | BB 網站 ${s.market?.bb?.last ?? '-'} 轉換 ${mine?.market.bb?.last ?? '-'} | VIX 網站 ${s.market?.vix?.last ?? '-'}/${s.market?.vix?.chg ?? '-'} 轉換 ${mine?.market.vix?.last ?? '-'}/${mine?.market.vix?.chg ?? '-'}`);
   console.log(`${s.id} 網站 pnl=${a?.pnl} base=${a?.base} swing=${s.market?.swing} at=${s.at} | 轉換 ${mine ? `pnl=${mine.accounts[0].pnl} base=${mine.accounts[0].base} swing=${mine.market.swing} at=${mine.at}` : '無'} ${same ? 'OK' : '<<差異'}`);
 }
 console.log(`符合 ${okCnt}/${site.length}`);
@@ -177,6 +260,7 @@ if (OUT) {
     const pnl = (r: any) => Math.round(r.asset - r.base);
     const data = {
       week, t: use.map((r: any) => new Date(r.t).toISOString().slice(0, 19).replace('T', ' ')), fut: use.map((r: any) => +r.fut.toFixed(1)),
+      ba: use.map((r: any) => r.ba === null ? null : Math.round(r.ba)), bb: use.map((r: any) => r.bb === null ? null : Math.round(r.bb)),
       acc: { [NAME]: {
         pnl: use.map(pnl), rate: use.map((r: any) => +(pnl(r) / r.base * 100).toFixed(2)), base: use.map((r: any) => r.base), asset: use.map((r: any) => Math.round(r.asset)),
         pts: use.map((r: any) => Math.round(r.pts ?? 0)), tv: use.map((r: any) => r.tv === null ? null : Math.round(r.tv)), ratio: use.map((r: any) => r.ratio),

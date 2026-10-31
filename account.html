@@ -202,7 +202,7 @@
         const { useState, useEffect, useCallback, useRef } = React;
         const params = new URLSearchParams(location.search);
         const ACCT = ACCOUNTS.find(a => a.id === params.get('id')) || accountOf(params.get('name'));
-        // 示範帳號 2026 年起的歷史：從下單程式的合約紀錄補回（scripts/import_demo_history.ts），只有這個帳號有；同一盤以網站存檔為準
+        // 示範帳號 2026 年起的歷史：下單程式的合約紀錄 + 試算表的時間價值 + 期交所 VIX（scripts/import_demo_history.ts），只有這個帳號有；同一盤以網站存檔為準
         const HISTORY_DIR = ACCT && ACCT.id === 'demo' ? 'data/demo-history' : null;
         const HISTORY_UNTIL = '2026-10-28';   // 這一週起網站自己有完整紀錄
         const withHistory = (history, own) => {
@@ -519,8 +519,8 @@
                 setSeries(prev => ({ ...prev, [w]: s, [`history:${w}`]: old }));
                 let parsed = d ? parseDemo(parseCSV(d), w) : null;
                 if (!parsed && live) { const h = await getText(DEMO_HISTORY(w)); parsed = h ? parseDemo(parseCSV(h), w) : null; }
-                // 補回的週沒有示範帳戶試算表可讀：期指用合約紀錄的（沒有週三、週五時價）
-                if (!parsed && old) parsed = { market: {}, series: old.t.map((ts, k) => ({ t: wallMs(ts), fut: old.fut[k], ba: null, bb: null })) };
+                // 補回的週沒有每週存檔可讀：期指、週三週五時價都在補回的檔案裡
+                if (!parsed && old) parsed = { market: {}, series: old.t.map((ts, k) => ({ t: wallMs(ts), fut: old.fut[k], ba: old.ba[k], bb: old.bb[k] })) };
                 setDemo(prev => ({ ...prev, [w]: parsed }));
             }, []);
 
@@ -712,7 +712,7 @@
                         </div>
                         <div id="win-strip"><${WinStrip} rows=${rows} selected=${cur} onPick=${pick} /></div>
                         <${SessionTable} rows=${rows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
-                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；沒有週三、週五時價與 VIX，百點震幅是用紀錄裡的期指算的。' : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
+                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；週三、週五時價取自試算表與下單紀錄，缺的盤顯示「—」；VIX 取自期交所，只有 7 月起的資料；百點震幅是用紀錄裡的期指算的。' : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 
                 </div>`;
