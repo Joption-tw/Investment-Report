@@ -1775,7 +1775,7 @@ function draw() {
   });
   ctx.restore();
 
-  // 每盤的波動率小框（資料來自 VOL；畫在該盤上方置中，盤太窄就不畫；有分時圖的可以點開）
+  // 每盤的波動率小框（資料來自 VOL；預設畫在該盤上方置中，可以用滑鼠拖到別的位置，盤太窄就不畫；有分時圖的可以點開）
   geom.volBoxes = [];
   ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
   D.sessions.forEach(s => {
@@ -1784,7 +1784,9 @@ function draw() {
     const xa = Math.max(xOf(s.si - 0.5), x0), xb = Math.min(xOf(s.ei + 0.5), x1);
     const p = dayResult(md), bw = 136, bh = 62 + (p ? 36 : 0) + (img ? 16 : 0);
     if (xb - xa < bw + 12) return;
-    const bx = Math.round((xa + xb) / 2 - bw / 2) + .5, by = y0 + 24.5, cx = bx + bw / 2;
+    const off = volPos[md] || { fx: 0, fy: 0 };           // 拖過的位置：x 用該盤寬度的比例、y 用圖高的比例，縮放時跟著該盤走
+    const bx = Math.round(clamp((xa + xb) / 2 - bw / 2 + off.fx * (xb - xa), x0, Math.max(x0, x1 - bw))) + .5;
+    const by = Math.round(clamp(y0 + 24 + off.fy * (y1 - y0), y0, Math.max(y0, y1 - bh))) + .5, cx = bx + bw / 2;
     ctx.globalAlpha = .92; ctx.fillStyle = '#f8fafc'; ctx.fillRect(bx, by, bw, bh); ctx.globalAlpha = 1;
     ctx.strokeStyle = img ? '#93c5fd' : '#e2e8f0'; ctx.lineWidth = 1;
     if (img) ctx.setLineDash([4, 3]);
@@ -1802,8 +1804,8 @@ function draw() {
     }
     if (img) {
       ctx.fillStyle = '#2563eb'; ctx.font = `700 11px ${FONT}`; ctx.fillText('🔍 點我看分時圖', cx, by + 60 + (p ? 36 : 0));
-      geom.volBoxes.push({ md, x: bx, y: by, w: bw, h: bh });
     }
+    geom.volBoxes.push({ md, x: bx, y: by, w: bw, h: bh, sw: xb - xa, fh: y1 - y0 });
   });
   ctx.restore();
 
@@ -1964,6 +1966,12 @@ $('btnErase').onclick = () => setEraser(!eraser);
 $('btnUndo').onclick = undoErase;
 $('btnEraseAll').onclick = eraseAll;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// 波動率小框的位置（存在這台電腦的瀏覽器）；拖曳移動、右鍵放回預設位置
+const VOL_POS_KEY = 'acctChart11VolPos';
+let volPos = {};
+try { volPos = JSON.parse(localStorage.getItem(VOL_POS_KEY) || '{}') || {}; } catch (e) {}
+const saveVolPos = () => { try { localStorage.setItem(VOL_POS_KEY, JSON.stringify(volPos)); } catch (e) {} };
+const volBoxAt = e => (geom.volBoxes || []).slice().reverse().find(b => px(e) >= b.x && px(e) <= b.x + b.w && py(e) >= b.y && py(e) <= b.y + b.h);
 // 判斷滑鼠位置：plot=圖內、y=某條 Y 軸、sl/sr=拉桿左右把手、sw=拉桿視窗、sj=拉桿空白處
 function hit(e) {
   const x = px(e), y = py(e), g = geom;
@@ -1982,9 +1990,13 @@ function hit(e) {
 }
 cv.addEventListener('pointerdown', e => {
   if (!D || !geom) return;
-  if (!eraser) {                               // 點到有分時圖的波動率小框 → 開圖
-    const vb = (geom.volBoxes || []).find(b => px(e) >= b.x && px(e) <= b.x + b.w && py(e) >= b.y && py(e) <= b.y + b.h);
-    if (vb && openVolImg(vb.md)) return;
+  if (!eraser && e.button === 0) {             // 按住波動率小框拖曳 → 移動；沒有移動就放開 → 開分時圖（pointerup 處理）
+    const vb = volBoxAt(e);
+    if (vb) {
+      const o = volPos[vb.md] || { fx: 0, fy: 0 };
+      drag = { mode: 'vol', md: vb.md, x: px(e), y: py(e), fx: o.fx, fy: o.fy, sw: vb.sw, fh: vb.fh, moved: false };
+      cv.setPointerCapture(e.pointerId); return;
+    }
   }
   const h = hit(e); if (!h) return;
   const g = geom, n = D.rows.length - 1;
@@ -2004,13 +2016,28 @@ cv.addEventListener('pointerdown', e => {
   }
   cv.setPointerCapture(e.pointerId);
 });
-cv.addEventListener('pointerup', () => { const d = drag; drag = null; if (d && d.mode === 'erase') commitErase(d); });
+cv.addEventListener('pointerup', () => {
+  const d = drag; drag = null;
+  if (d && d.mode === 'erase') commitErase(d);
+  if (d && d.mode === 'vol') { if (d.moved) saveVolPos(); else openVolImg(d.md); }
+});
+cv.addEventListener('contextmenu', e => {       // 在波動率小框按右鍵：放回預設位置
+  const vb = D && geom && volBoxAt(e); if (!vb || !volPos[vb.md]) return;
+  e.preventDefault(); delete volPos[vb.md]; saveVolPos(); draw();
+});
 cv.addEventListener('pointerleave', () => { if (eraser) { erasePos = null; draw(); } });
 cv.addEventListener('pointermove', e => {
   if (!D || !geom) return;
   const g = geom, n = D.rows.length - 1, tip = $('tip');
   if (eraser) erasePos = { x: px(e), y: py(e) };
   if (drag && drag.mode === 'erase') { eraseAt(px(e), py(e)); return; }
+  if (drag && drag.mode === 'vol') {
+    const dx = px(e) - drag.x, dy = py(e) - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;       // 手抖不算移動，放開時才能當成點一下
+    drag.moved = true; volPos[drag.md] = { fx: drag.fx + dx / drag.sw, fy: drag.fy + dy / drag.fh };
+    hoverIdx = null; tip.style.display = 'none'; cv.style.cursor = 'grabbing'; draw(); return;
+  }
+  if (!drag && !eraser && volBoxAt(e)) { cv.style.cursor = 'move'; hoverIdx = null; tip.style.display = 'none'; draw(); return; }
   if (drag && drag.mode !== 'plot') {
     const minSpan = Math.min(8, n), ix = (px(e) - g.x0) / (g.x1 - g.x0) * n;
     if (drag.mode === 'y') {
