@@ -2,7 +2,36 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        // 手機直向：整份排成一頁（用電腦版版面寬 1040 排好，再縮到螢幕寬，可雙指放大）；手機橫向：一般寬度 + 兩頁（見下方 CSS）
+        (function () {
+            const meta = document.querySelector('meta[name="viewport"]');
+            const portrait = matchMedia('(orientation: portrait)');
+            const side = Math.min(screen.width, screen.height);
+            function apply() {
+                const on = side < 600 && portrait.matches;
+                document.documentElement.classList.toggle('m-portrait', on);
+                meta.setAttribute('content', on ? `width=1040, initial-scale=${(side / 1040).toFixed(3)}, minimum-scale=${(side / 1040).toFixed(3)}, maximum-scale=6` : 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+                syncVisible();
+            }
+            // 手機橫向用：實際可視範圍（放大時不跟著變，否則版面會亂跳）
+            function syncVisible() {
+                const v = window.visualViewport;
+                if (!v || v.scale > 1.01) return;
+                const st = document.documentElement.style;
+                st.setProperty('--vv-top', `${v.offsetTop}px`);
+                st.setProperty('--vv-h', `${v.height}px`);
+                if (!portrait.matches && (window.scrollX || window.scrollY)) window.scrollTo(0, 0);
+            }
+            apply();
+            portrait.addEventListener('change', apply);
+            if (window.visualViewport) {
+                visualViewport.addEventListener('resize', syncVisible);
+                visualViewport.addEventListener('scroll', syncVisible);
+            }
+        })();
+    </script>
     <title>帳號績效 · 歐大的投資報表</title>
     <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
@@ -29,9 +58,113 @@
         @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
         .live-indicator { animation: pulse-soft 2s infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 換頁鈕只在手機橫向出現；打橫提示只在手機直向出現 */
+        #page-btn, #rotate-hint { display: none; }
+        /* 可放大的頁面上，按鈕要關掉雙擊縮放，否則連按會被當成縮放手勢 */
+        button, a, select { touch-action: manipulation; }
+
+        /* ===== 手機直向：整份一頁（圖表撐滿剩餘高度），字放大 ===== */
+        html.m-portrait #app-root { min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; padding: 6px !important; }
+        html.m-portrait #app-root > * { flex: 0 0 auto; }
+        html.m-portrait #chart-card { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+        html.m-portrait #performance-chart { flex: 1 1 auto; height: auto !important; min-height: 340px; }
+        html.m-portrait #rotate-hint { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 10px 16px; border-radius: 14px;
+            background: #fef3c7; border: 3px solid #f59e0b; color: #92400e; font-size: 38px; font-weight: 900; line-height: 1.15; }
+        html.m-portrait .rotate-hint-icon { width: 46px; height: 46px; transform: rotate(90deg); flex: none; }
+        html.m-portrait #stats-row .glass-card { padding: 6px 3px !important; }
+        html.m-portrait #stats-row .glass-card p:first-child { font-size: 12px !important; white-space: nowrap; }
+        html.m-portrait #stats-row .stat-value { font-size: 18px !important; }
+        html.m-portrait #stats-row p:last-child:not(:first-child) { font-size: 13px !important; white-space: nowrap; }
+        html.m-portrait .session-btn { font-size: 18px !important; }
+        html.m-portrait .session-btn span:last-child { font-size: 14px !important; }
+        html.m-portrait #line-picker button, html.m-portrait #line-picker > span:first-child { font-size: 17px !important; }
+        html.m-portrait #app-root th { padding: 6px 2px !important; font-size: 14px !important; line-height: 1.15 !important; letter-spacing: 0 !important; white-space: normal !important; }
+        html.m-portrait #app-root td { padding: 6px 3px !important; font-size: 15px !important; line-height: 1.2 !important; }
+        html.m-portrait #page-session td div + div { font-size: 12px !important; line-height: 1.1 !important; }
+        html.m-portrait #page-session h2 { font-size: 22px !important; }
+        html.m-portrait #page-session h2 ~ span, html.m-portrait #page-session label, html.m-portrait #page-session select { font-size: 15px !important; }
+        html.m-portrait #page-session > p { font-size: 14px !important; }
+        html.m-portrait #win-strip span { font-size: 14px !important; }
+        html.m-portrait #win-strip .h-9 { font-size: 20px !important; }
+
+        /* ===== 手機橫向（打橫）：兩頁，第 1 頁數字 + 走勢圖、第 2 頁每盤績效表；版面固定貼齊可視範圍，換頁鈕在右下角 ===== */
+        @media (orientation: landscape) and (max-height: 600px) {
+            html, body { height: 100%; overflow: hidden !important; }
+
+            /* 固定貼齊實際可視範圍的最上方（iPhone 轉橫向時頁面可能被往下推）；左右只讓開瀏海 */
+            #app-root { position: fixed !important; top: calc(var(--vv-top, 0px) + 2px);
+                        left: max(3px, env(safe-area-inset-left)); right: max(3px, env(safe-area-inset-right));
+                        height: calc(var(--vv-h, 100vh) - 4px); max-width: none !important; margin: 0 !important; padding: 0 !important;
+                        display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+            #app-root > * { margin: 0 !important; flex: 0 0 auto; }
+
+            /* 頁首：壓成一行 */
+            header { display: flex !important; flex-direction: row !important; align-items: center !important; justify-content: space-between !important; padding: 1px 8px !important; gap: 8px !important; }
+            header > a { padding: 3px 8px !important; font-size: 11px !important; white-space: nowrap; }
+            header > div:nth-child(2) { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
+            header h1 { font-size: 0.9rem !important; line-height: 1.1 !important; white-space: nowrap; }
+            header h1 span { font-size: 10px !important; line-height: 1 !important; margin-left: 4px !important; }
+            header > div:nth-child(2) > div { margin: 0 !important; flex-wrap: nowrap !important; min-width: 0; }
+            header > div:nth-child(2) > div > span:first-child { display: none !important; }
+            header > div:nth-child(2) button { font-size: 10px !important; padding: 0 8px !important; }
+            header > div:last-child { flex: 0 0 auto; flex-direction: row !important; align-items: center !important; gap: 6px !important; }
+            header > div:last-child button { padding: 3px 8px !important; font-size: 10px !important; white-space: nowrap; }
+
+            /* 八張統計卡一整排：壓到最扁，數字為主 */
+            #stats-row { grid-template-columns: none !important; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px !important; }
+            #stats-row .glass-card { min-height: 0 !important; padding: 1px 4px !important; border-left-width: 3px !important; }
+            #stats-row .glass-card p:first-child { font-size: 8px !important; line-height: 1.1 !important; margin: 0 !important; white-space: nowrap; overflow: hidden; }
+            #stats-row .stat-value { font-size: 12px !important; line-height: 1.15 !important; }
+            #stats-row p:last-child:not(:first-child) { font-size: 8px !important; line-height: 1 !important; margin: 0 !important; white-space: nowrap; overflow: hidden; }
+
+            /* 十個盤別 + 整週一整排：壓扁 */
+            #session-row { padding: 1px !important; }
+            #session-row > div { grid-template-columns: repeat(11, minmax(0, 1fr)) !important; gap: 2px !important; }
+            .session-btn { padding: 1px !important; gap: 0; font-size: 10px !important; line-height: 1.1; border-radius: 0.3rem !important; white-space: nowrap; overflow: hidden; }
+            .session-btn span:last-child { font-size: 8px !important; }
+            .session-btn.active { transform: none; box-shadow: none; }
+
+            /* 圖表卡：撐滿剩餘高度；選線按鈕擠成一行 */
+            #chart-card { flex: 1 1 auto !important; min-height: 0 !important; display: flex !important; flex-direction: column !important; padding: 2px !important; }
+            #chart-card > * { margin-bottom: 0 !important; flex: 0 0 auto; }
+            #line-picker { flex-wrap: nowrap !important; justify-content: flex-start !important; gap: 3px !important; padding: 0 !important; overflow-x: auto; scrollbar-width: none; }
+            #line-picker::-webkit-scrollbar { display: none; }
+            #chart-card > .h-\[440px\] { flex: 1 1 auto; height: auto !important; min-height: 0; }
+            #line-picker > span:first-child { display: none !important; }
+            #line-picker > span { gap: 3px !important; }
+            #line-picker button { flex: 0 0 auto; min-height: 24px; padding: 0 7px !important; font-size: 10px !important; white-space: nowrap; border-width: 1.5px !important; }
+            #performance-chart { flex: 1 1 auto !important; height: auto !important; min-height: 0 !important; }
+
+            /* 第 2 頁：每盤績效表（第 1 頁是圖表）；勝敗條跟表格的勝負欄重複，收起來把空間留給表格 */
+            #page-session { display: none; }
+            #win-strip { display: none; }
+            #page-session > div:first-child { padding: 1px 8px !important; }
+            #page-session h2 { font-size: 12px !important; white-space: nowrap; }
+            #page-session h2 ~ span, #page-session label { font-size: 9.5px !important; }
+            #page-session select { padding: 0 4px !important; font-size: 11px !important; min-height: 22px; }
+            #page-session > p { padding: 3px 8px !important; }
+            #page-session { --fit-font: clamp(9.5px, calc((100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)) * .0145), 11px); }
+            #page-session table { width: 100% !important; }
+            #page-session th { padding: 2px !important; font-size: 9.5px !important; line-height: 1.1 !important; letter-spacing: 0 !important; white-space: normal !important; }
+            #page-session td { padding: 1px 3px !important; font-size: var(--fit-font) !important; line-height: 1.15 !important; }
+            #page-session td div + div { font-size: 8px !important; line-height: 1 !important; }
+            #page-session td .h-7 { width: 22px !important; height: 16px !important; font-size: 10px !important; }
+            body.m-page-2 #app-root { overflow-y: auto; padding-bottom: 64px !important; }
+            body.m-page-2 #app-root > *:not(header) { display: none !important; }
+            body.m-page-2 #app-root > #page-session { display: block !important; }
+
+            /* 換頁鈕放右下角並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
+            #page-btn { display: inline-flex; align-items: center; justify-content: center; position: fixed; z-index: 60;
+                        right: max(10px, env(safe-area-inset-right)); bottom: calc(max(6px, env(safe-area-inset-bottom)) + 8px);
+                        min-width: 108px; min-height: 44px; padding: 0 14px; border-radius: 12px; background: #1e293b; color: #fff;
+                        font-size: 14px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 10px rgba(15, 23, 42, .35); }
+            #page-btn:active { background: #2563eb; transform: scale(.96); }
+        }
     </style>
 </head>
 <body>
+    <button id="page-btn" type="button" onclick="setMobilePage(mobilePage === 2 ? 1 : 2)">下一頁 ▶</button>
     <div id="root">
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;">
             <div style="width:48px;height:48px;border:4px solid #e2e8f0;border-top-color:#eab308;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
@@ -42,6 +175,16 @@
         // 單一帳號的績效頁：account.html?id=<代號>（代號見 common.js 的 ACCOUNTS），版面參考 sample（示範帳戶即時績效）
         // 走勢：該帳號每 2 分鐘的「兩分鐘紀錄」＋績效表每 10 分鐘的快照（試算表只留最近的，更早的由 GitHub Actions 存到 data/series/<週>.json）
         //       期指 / 週三、週五時價取自示範帳戶試算表（每 2 分鐘）
+        // 手機橫向換頁（直向與電腦版的 CSS 不看這個 class）；回到第 1 頁時圖表要重新量尺寸（藏起來時量不到）
+        let mobilePage = 1;
+        function setMobilePage(n) {
+            mobilePage = n;
+            document.body.classList.toggle('m-page-2', n === 2);
+            document.getElementById('page-btn').innerText = n === 2 ? '◀ 上一頁' : '下一頁 ▶';
+            document.getElementById('app-root').scrollTop = 0;
+            if (n === 1) window.dispatchEvent(new Event('resize'));
+        }
+
         const { useState, useEffect, useCallback, useRef } = React;
         const params = new URLSearchParams(location.search);
         const ACCT = ACCOUNTS.find(a => a.id === params.get('id')) || accountOf(params.get('name'));
@@ -78,10 +221,10 @@
             const z = hi / (hi - lo);
             return new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: AREA_UP }, { offset: z, color: AREA_UP }, { offset: z, color: AREA_DOWN }, { offset: 1, color: AREA_DOWN }]);
         };
-        const peakPoints = (s, fmt) => {
+        const peakPoints = (s, fmt, fontSize) => {
             if (!s.peak) return undefined;
             const label = (color, position, offset) => ({ color, position, offset, formatter: p => fmt(p.value, s) });
-            return { symbol: 'circle', symbolSize: 0, label: { show: true, fontSize: 10, fontWeight: s.peak.bold ? 'bold' : 'normal' },
+            return { symbol: 'circle', symbolSize: 0, label: { show: true, fontSize, fontWeight: s.peak.bold ? 'bold' : 'normal' },
                      data: [s.peak.max && { type: 'max', label: label(s.peak.max, 'top', [0, -5]) },
                             s.peak.min && { type: 'min', label: label(s.peak.min, 'bottom', [0, 5]) }].filter(Boolean) };
         };
@@ -102,6 +245,14 @@
             const ref = useRef(null), chart = useRef(null), drawn = useRef([]), lastRange = useRef(null);
             const live = useRef({});
             live.current = { eraser, onErase, onEraseEnd };
+            // 手機轉向時重畫（直向、橫向的字級和邊界不同）
+            const [turned, setTurned] = useState(0);
+            useEffect(() => {
+                const portrait = matchMedia('(orientation: portrait)');
+                const onTurn = () => setTurned(n => n + 1);
+                portrait.addEventListener('change', onTurn);
+                return () => portrait.removeEventListener('change', onTurn);
+            }, []);
             useEffect(() => {
                 const c = chart.current = echarts.init(ref.current);
                 const onResize = () => c.resize();
@@ -135,10 +286,16 @@
                 const src = { acc: acc.filter(p => p.t >= min && p.t <= max), demo: demo.filter(p => p.t >= min && p.t <= max) };
                 const on = SERIES_DEFS.filter(s => shown.includes(s.key));
                 const used = AXIS_KEYS.filter(k => on.some(s => s.axis === k));
+                // 手機（含打橫：寬度雖大但高度很矮）；直向是用 1040 寬排版再縮小，圖上的字和拉桿要放大；橫向下方拉桿讓開換頁鈕
+                const mPortrait = document.documentElement.classList.contains('m-portrait');
+                const mLandscape = matchMedia('(orientation: landscape) and (max-height: 600px)').matches;
+                const phone = window.innerWidth < 768 || mPortrait || mLandscape;
+                const fontSize = mPortrait ? 18 : 10;
+                const axisW = mPortrait ? 80 : mLandscape ? 42 : 55;
                 // 手機寬度不夠：每邊只顯示一個軸的刻度（其他線一樣用自己的刻度畫）
-                const usedAxes = window.innerWidth < 768 ? used.filter(k => used.find(x => AXES[x].side === AXES[k].side) === k) : used;
+                const usedAxes = phone ? used.filter(k => used.find(x => AXES[x].side === AXES[k].side) === k) : used;
                 const offsetOf = {}, count = { left: 0, right: 0 };
-                usedAxes.forEach(k => { offsetOf[k] = count[AXES[k].side]++ * 55; });
+                usedAxes.forEach(k => { offsetOf[k] = count[AXES[k].side]++ * axisW; });
                 const byName = Object.fromEntries(SERIES_DEFS.map(s => [s.label, s]));
                 // 每條線：拿掉塗掉的點 → 過濾跳點（示範帳戶資料在上層已過濾）→ 跟前後兩點平均，跟 sample 一樣
                 // 當盤的線（field）在盤與盤之間斷開，下一盤重新從 0 畫起
@@ -160,23 +317,25 @@
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
-                    grid: { left: count.left * 55 + 15, right: count.right * 55 + 15, top: 30, bottom: 70 },
-                    tooltip: { show: !eraser, trigger: 'axis', axisPointer: { type: 'line' }, confine: true,
+                    grid: mLandscape ? { left: count.left * axisW + 4, right: count.right * axisW + 4, top: 24, bottom: 52 }
+                        : { left: count.left * axisW + 15, right: count.right * axisW + 15, top: mPortrait ? 44 : 30, bottom: mPortrait ? 110 : 70 },
+                    tooltip: { show: !eraser, trigger: 'axis', axisPointer: { type: 'line' }, confine: true, textStyle: { fontSize: mPortrait ? 24 : 14 },
                         formatter: ps => ps.length ? `<b>${mdhm(ps[0].value[0])}</b><br>` + ps.map(p => `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], byName[p.seriesName])}</b>`).join('<br>') : '' },
                     xAxis: { type: 'time', min, max, splitLine: { show: false },
-                        axisLabel: { hideOverlap: true, color: '#64748b', fontWeight: 'bold', formatter: v => wholeWeek ? mdhm(v).replace(' ', '\n') : hhmm(v) } },
+                        axisLabel: { hideOverlap: true, color: '#64748b', fontWeight: 'bold', fontSize: mPortrait ? fontSize : undefined, formatter: v => wholeWeek ? mdhm(v).replace(' ', '\n') : hhmm(v) } },
                     yAxis: AXIS_KEYS.map(k => {
                         const a = AXES[k], first = usedAxes[0] === k;
-                        return { type: 'value', name: a.name, position: a.side, offset: offsetOf[k] || 0, show: usedAxes.includes(k),
+                        return { type: 'value', name: a.name, nameGap: mLandscape ? 8 : undefined, nameTextStyle: mPortrait ? { fontSize } : undefined, position: a.side, offset: offsetOf[k] || 0, show: usedAxes.includes(k),
                                  scale: !!a.scale, min: a.min, max: a.max,
-                                 axisLabel: { color: a.color, fontWeight: 'bold', fontSize: 10, formatter: a.fmt },
+                                 axisLabel: { color: a.color, fontWeight: 'bold', fontSize, formatter: a.fmt },
                                  splitLine: first ? { lineStyle: { type: 'dashed', color: '#f1f5f9' } } : { show: false } };
                     }),
                     dataZoom: [
                         // 滾輪留給頁面捲動：電腦按住 Ctrl + 滾輪縮放、拖曳平移；手機只用下方拉桿
-                        { type: 'inside', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', disabled: eraser || window.innerWidth < 768,
+                        { type: 'inside', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', disabled: eraser || phone,
                           zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false, moveOnMouseMove: true },
-                        { type: 'slider', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', bottom: 8, height: 24, showDetail: false, brushSelect: false }
+                        { type: 'slider', xAxisIndex: 0, start: zoom[0], end: zoom[1], filterMode: 'none', showDetail: false, brushSelect: false,
+                          ...(mLandscape ? { left: 10, right: 130, bottom: 4, height: 18 } : mPortrait ? { bottom: 10, height: 44 } : { bottom: 8, height: 24 }) }
                     ],
                     series: lines.map(({ def: s, points: data }) => {
                         const color = s.area ? signFill(data) : s.color;
@@ -185,13 +344,13 @@
                             smooth: true, showSymbol: false, z: s.z,
                             lineStyle: s.area ? { width: 1, color } : { width: 2.2, color, shadowBlur: 3 }, itemStyle: { color: s.area ? s.color : color }, emphasis: { disabled: true },
                             areaStyle: s.area ? { color, opacity: 0.35 } : undefined,
-                            markPoint: data.length ? peakPoints(s, fmt) : undefined,
+                            markPoint: data.length ? peakPoints(s, fmt, fontSize) : undefined,
                             markLine: s.key === 'rate' && data.length ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined
                         };
                     })
                 }, true);
                 drawn.current = lines;
-            }, [acc, demo, range, shown, wholeWeek, hidden, eraser]);
+            }, [acc, demo, range, shown, wholeWeek, hidden, eraser, turned]);
             return html`<div id="performance-chart" ref=${ref} style=${eraser ? { cursor: 'crosshair', touchAction: 'none' } : undefined}></div>`;
         };
 
@@ -199,7 +358,7 @@
         const LinePicker = ({ shown, setShown }) => {
             const toggle = k => setShown(shown.includes(k) ? shown.filter(x => x !== k) : [...shown, k]);
             return html`
-                <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 mb-3 px-1">
+                <div id="line-picker" className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 mb-3 px-1">
                     <span className="w-full sm:w-auto text-center text-[10px] font-black text-slate-400 sm:mr-1">點選要看的線：</span>
                     ${SERIES_DEFS.map(s => {
                         const on = shown.includes(s.key);
@@ -412,7 +571,7 @@
             const last = acc[acc.length - 1] || null;
             const m = row ? row.market : {};
             const chgSub = r => r && r.many ? html`<span className=${r.chg >= 0 ? 'text-red-500' : 'text-emerald-500'}>${r.chg > 0 ? '+' : ''}${Math.round(r.chg).toLocaleString()} (${sgnPct(r.pct)})</span>` : null;
-            const pick = i => setSel(i);
+            const pick = i => { setSel(i); if (mobilePage === 2) setMobilePage(1); };   // 在第 2 頁點某一盤 → 回圖表
 
             const copyLink = () => {
                 const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1500); };
@@ -421,7 +580,7 @@
             const shortUrl = `${location.host}${location.pathname}?id=${ACCT.id}`;
 
             return html`
-                <div className="max-w-[1500px] mx-auto space-y-2 sm:space-y-3 p-1.5 sm:p-4">
+                <div id="app-root" className="max-w-[1500px] mx-auto space-y-2 sm:space-y-3 p-1.5 sm:p-4">
                     <header className="glass-card px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:grid sm:grid-cols-[1fr_auto_1fr] items-center gap-3">
                         ${ACCT.home !== false
                             ? html`<a href="./" className="self-start sm:self-center sm:justify-self-start inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-900 text-yellow-400 font-black text-xs hover:bg-slate-800">← 總表</a>`
@@ -442,7 +601,12 @@
                         </div>
                     </header>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 sm:gap-2 text-center">
+                    <div id="rotate-hint">
+                        <svg className="rotate-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+                        <span>手機打橫看報表，字更大更清楚！</span>
+                    </div>
+
+                    <div id="stats-row" className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 sm:gap-2 text-center">
                         <${Stat} label="本週獲利" color="border-l-rose-500" sub=${last && html`<span className=${toneOf(last.pnl)}>${sgnInt(last.pnl)}</span>`}>
                             <span className=${last ? toneOf(last.rate) : 'text-slate-300'}>${last && last.rate !== null ? sgnPct(last.rate) : '--'}</span>
                         <//>
@@ -461,7 +625,7 @@
                         <//>
                     </div>
 
-                    <div className="glass-card p-1 sm:p-1.5">
+                    <div id="session-row" className="glass-card p-1 sm:p-1.5">
                         <div className="grid grid-cols-6 md:grid-cols-11 gap-1">
                             ${rows.map(r => {
                                 const res = r.pending ? null : resultOf(r.pnl);
@@ -477,7 +641,7 @@
                         </div>
                     </div>
 
-                    <div className="glass-card p-2 md:p-4">
+                    <div id="chart-card" className="glass-card p-2 md:p-4">
                         <${LinePicker} shown=${shown} setShown=${setShown} />
                         ${canErase && (() => {
                             // 這一段時間裡塗掉的點（本帳號＋市場資料）
@@ -509,7 +673,7 @@
                         ${!loading && !acc.some(p => p.t >= range[0] && p.t <= range[1]) && html`<p className="text-center text-xs font-bold text-slate-400 -mt-2 pb-2">這一盤還沒有這個帳號的走勢資料</p>`}
                     </div>
 
-                    <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
+                    <div id="page-session" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                         <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                             <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`}</span></h2>
                             <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, sum)}</span>
@@ -519,7 +683,7 @@
                                 </select>
                             </label>
                         </div>
-                        <${WinStrip} rows=${rows} selected=${cur} onPick=${pick} />
+                        <div id="win-strip"><${WinStrip} rows=${rows} selected=${cur} onPick=${pick} /></div>
                         <${SessionTable} rows=${rows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
                         <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換上方圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
