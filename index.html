@@ -64,6 +64,46 @@
         .hl-up .hl-chg { color: #fca5a5; }
         .hl-down { background: rgba(34, 197, 94, .18); }
         .hl-down .hl-chg { color: #4ade80; }
+        /* 時間價值、期貨指數：格子本身是按鈕，點了放大走勢圖；數字旁邊是當盤的微型走勢 */
+        .hl-btn { cursor: pointer; transition: background .15s; }
+        .hl-btn:hover, .hl-btn:active { background: #1e293b; }
+        .hl-body { display: flex; align-items: center; gap: 10px; }
+        .hl-spark { position: relative; display: block; flex: none; width: 76px; height: 30px; }
+        .hl-spark svg { display: block; width: 100%; height: 100%; overflow: visible; }
+        .hl-spark polyline { fill: none; stroke-width: 2px; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+        .hl-spark i { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; }
+        #trend-btn { display: none; }
+
+        /* 放大的走勢圖：蓋在整個畫面上（掛在 body 底下，才蓋得過手機橫向的換頁鈕） */
+        .tr-back { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(15, 23, 42, .65); }
+        .tr-panel { display: flex; flex-direction: column; width: min(1120px, 100%); max-height: 100%; overflow: hidden; border-radius: 12px; background: #fff; box-shadow: 0 20px 50px rgba(15, 23, 42, .4); }
+        .tr-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 12px 18px; background: #0f172a; color: #fff; }
+        .tr-title { color: #facc15; font-size: 18px; font-weight: 900; }
+        .tr-value { font-size: 28px; font-weight: 900; line-height: 1; }
+        .tr-sub { color: #94a3b8; font-size: 13px; font-weight: 700; }
+        .tr-note { margin-left: auto; color: #64748b; font-size: 12px; font-weight: 700; }
+        .tr-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 18px; border-bottom: 1px solid #e2e8f0; }
+        .tr-group { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: #f1f5f9; }
+        .tr-tab { min-height: 36px; padding: 0 14px; border-radius: 8px; color: #475569; font-size: 14px; font-weight: 800; cursor: pointer; }
+        .tr-tab[aria-pressed="true"] { background: #0f172a; color: #fff; }
+        .tr-close { min-height: 36px; margin-left: auto; padding: 0 14px; border-radius: 8px; background: #f1f5f9; color: #334155; font-size: 14px; font-weight: 800; cursor: pointer; }
+        .tr-close:hover { background: #e2e8f0; }
+        .tr-chart { position: relative; flex: 1 1 auto; min-height: 0; height: min(62vh, 560px); }
+        .tr-chart > div { width: 100%; height: 100%; }
+        .tr-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 15px; font-weight: 700; }
+
+        /* 走勢圖：手機直向（1040 寬縮小顯示，字和按鈕都要放大） */
+        html.m-portrait .tr-back { padding: 20px; }
+        html.m-portrait .tr-head { padding: 24px 30px; gap: 8px 20px; }
+        html.m-portrait .tr-title { font-size: 40px; }
+        html.m-portrait .tr-value { font-size: 64px; }
+        html.m-portrait .tr-sub { font-size: 28px; }
+        html.m-portrait .tr-note { width: 100%; margin: 0; font-size: 24px; }
+        html.m-portrait .tr-controls { padding: 20px 30px; gap: 16px 24px; }
+        html.m-portrait .tr-tab, html.m-portrait .tr-close { min-height: 84px; padding: 0 28px; border-radius: 14px; font-size: 34px; }
+        html.m-portrait .tr-group { padding: 6px; border-radius: 18px; }
+        html.m-portrait .tr-chart { height: 1000px; }
+        html.m-portrait .tr-msg { font-size: 34px; }
         @media (max-width: 639px) {
             .hl-cell { padding: 6px 4px; }
             .hl-label { margin-bottom: 4px; font-size: 11px; }
@@ -72,6 +112,12 @@
             .hl-chg { gap: 4px; }
             .hl-pts { font-size: 19px; }
             .hl-pct { font-size: 12px; }
+            .hl-body { flex-direction: column; gap: 3px; width: 100%; }
+            .hl-spark { width: 100%; height: 18px; }
+            .tr-back { padding: 8px; }
+            .tr-note { width: 100%; margin: 0; }
+            .tr-controls { padding: 8px 10px; }
+            .tr-tab, .tr-close { padding: 0 10px; }
         }
 
         /* 換頁鈕只在手機橫向出現；打橫提示只在手機直向出現 */
@@ -93,6 +139,10 @@
         html.m-portrait header .hl-fut { font-size: 40px !important; }
         html.m-portrait header .hl-pts { font-size: 58px !important; }
         html.m-portrait header .hl-pct { font-size: 36px !important; }
+        html.m-portrait header .hl-body { flex-direction: column; gap: 10px; width: 100%; }
+        html.m-portrait header .hl-spark { width: 100%; height: 46px; }
+        html.m-portrait header .hl-spark polyline { stroke-width: 4px; }
+        html.m-portrait header .hl-spark i { width: 12px; height: 12px; margin: -6px 0 0 -6px; }
         html.m-portrait main { padding: 8px !important; }
         html.m-portrait #session-panel { padding: 0 8px 8px !important; }
         html.m-portrait #session-panel > div > * + * { margin-top: 8px !important; }
@@ -142,8 +192,10 @@
             header .hl-chg { gap: 3px; }
             header .hl-pts { font-size: 18px; }
             header .hl-pct { font-size: 12px; }
-            header button span:last-child { display: none; }
-            header button span:first-child { font-size: 14px; }
+            header .hl-body { flex-direction: row; gap: 4px; width: auto; }
+            header .hl-spark { width: 40px; height: 16px; }
+            header .hl-refresh span:last-child { display: none; }
+            header .hl-refresh span:first-child { font-size: 14px; }
 
             /* 版面滿版、去除多餘留白 */
             main, #session-panel { padding: 2px !important; }
@@ -190,10 +242,32 @@
             #page-nav button { width: 48px; height: 44px; color: #fff; font-size: 15px; font-weight: 900; border-radius: 12px; }
             #page-nav button:active { background: #2563eb; }
             #page-nav button:disabled { color: #64748b; background: none; }
+
+            /* 最上緣不好點，放大走勢圖的入口也放一顆在左下角 */
+            #trend-btn { display: flex; align-items: center; position: fixed; z-index: 60;
+                         left: max(10px, env(safe-area-inset-left)); bottom: calc(max(6px, env(safe-area-inset-bottom)) + 4px);
+                         min-height: 44px; padding: 0 14px; border-radius: 12px; background: #1e293b; color: #fff; font-size: 14px; font-weight: 900; white-space: nowrap;
+                         box-shadow: 0 2px 10px rgba(15, 23, 42, .35); }
+            #trend-btn:active { background: #2563eb; }
+
+            /* 走勢圖滿版；切換鈕移到最下面，上緣留給標題 */
+            .tr-back { top: var(--vv-top, 0px); bottom: auto; left: 0; right: 0; height: var(--vv-h, 100vh); padding: 0; }
+            .tr-panel { width: 100%; height: 100%; border-radius: 0; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+            .tr-head { flex-wrap: nowrap; gap: 8px; padding: 3px 10px; white-space: nowrap; }
+            .tr-title { font-size: 13px; }
+            .tr-value { font-size: 18px; }
+            .tr-sub { font-size: 11px; }
+            .tr-note { display: none; }
+            .tr-chart { order: 2; height: auto; }
+            .tr-controls { order: 3; flex-wrap: nowrap; padding: 4px 10px calc(max(4px, env(safe-area-inset-bottom))); border-top: 1px solid #e2e8f0; border-bottom: 0; }
+            .tr-tab, .tr-close { min-height: 40px; }
         }
-        /* 很窄的橫向手機放不下更新時間，讓給重點數字 */
-        @media (orientation: landscape) and (max-height: 600px) and (max-width: 640px) {
+        /* 較窄的橫向手機放不下更新時間，讓給重點數字；再窄就連微型走勢也收起來 */
+        @media (orientation: landscape) and (max-height: 600px) and (max-width: 760px) {
             header > div:first-child { display: none !important; }
+        }
+        @media (orientation: landscape) and (max-height: 600px) and (max-width: 620px) {
+            header .hl-spark { display: none; }
         }
     </style>
 </head>
@@ -222,7 +296,7 @@
             document.getElementById('app-root').scrollTop = 0;
         }
 
-        const { useState, useEffect, useCallback } = React;
+        const { useState, useEffect, useCallback, useRef } = React;
 
         const VERSION  = "V2.2 優化版";
         const SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
@@ -282,6 +356,181 @@
 
         const formatTime = (date) => date.toTimeString().split(' ')[0];
 
+        // ===== 時間價值、期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列（頁首的數字也是這一列）=====
+        const TREND_METRICS = {
+            tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4 },
+            fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3 }
+        };
+        const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
+                                 + `&tq=${encodeURIComponent(`select A,F,K where B starts with '示範帳號' and A >= '${since}'`)}&t=${Date.now()}`;
+        const sessionKey = p => `${p.week}-${p.slot}`;
+        // 資料偶爾連續幾筆跳到離譜的數字（例：期指 46,000 跳 48,050），3 點平均濾不掉，所以用前後幾筆的中位數；每一盤分開算
+        const medianIn = (pts, key, win) => pts.map((_, i) => {
+            const v = pts.slice(Math.max(0, i - win), i + win + 1).map(p => p[key]).filter(x => x !== null).sort((a, b) => a - b);
+            return v.length && pts[i][key] !== null ? v[v.length >> 1] : null;
+        });
+        // 盤中期指連續 5 筆（8 分鐘以上）一模一樣 = 報價卡住沒在更新，不是行情沒動：這段連時間價值一起當沒資料，線會斷開
+        const STALE_RUN = 5;
+        const dropStale = (pts) => {
+            for (let i = 0, j; i < pts.length; i = j) {
+                for (j = i + 1; j < pts.length && pts[j].fut === pts[i].fut; j++);
+                if (j - i >= STALE_RUN) for (let k = i; k < j; k++) { pts[k].tv = null; pts[k].fut = null; }
+            }
+        };
+        const parseTrend = (rows) => {
+            const pts = rows.slice(1).map(r => ({ t: wallMs(r[0]), tv: toNum(r[1]), fut: toNum(r[2]) || null })).filter(p => p.t !== null)
+                            .map(p => ({ ...p, ...slotAt(new Date(p.t)) }));
+            const groups = new Map();
+            pts.forEach(p => { const k = sessionKey(p); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
+            groups.forEach(g => {
+                dropStale(g);
+                Object.keys(TREND_METRICS).forEach(key => {
+                    const clean = medianIn(g, key, TREND_METRICS[key].win);
+                    g.forEach((p, i) => { p[key] = clean[i]; });
+                });
+            });
+            return pts;
+        };
+        const fetchTrend = async (since) => {
+            const r = await fetch(TREND_URL(since.replace(/-/g, '/')));
+            if (!r.ok) throw new Error('無法讀取走勢');
+            return parseTrend(parseCSV(await r.text()));
+        };
+        const fmtTrend = v => v === null || v === undefined ? '—' : Math.round(v).toLocaleString();
+
+        // 走勢圖的 ECharts 第一次放大才載入，平常開總表不用多下載
+        let echartsLoading = null;
+        const loadEcharts = () => {
+            if (window.echarts) return Promise.resolve();
+            if (!echartsLoading) echartsLoading = new Promise((ok, fail) => {
+                const el = document.createElement('script');
+                el.src = 'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js';
+                el.onload = ok;
+                el.onerror = () => { echartsLoading = null; fail(new Error('無法載入圖表')); };
+                document.head.appendChild(el);
+            });
+            return echartsLoading;
+        };
+
+        const Sparkline = ({ values, color }) => {
+            const vs = values.filter(v => v !== null);
+            if (vs.length < 2) return html`<span className="hl-spark"></span>`;
+            const lo = Math.min(...vs), span = (Math.max(...vs) - lo) || 1;
+            const yOf = v => 92 - (v - lo) / span * 84;
+            const points = vs.map((v, i) => `${(i / (vs.length - 1) * 100).toFixed(2)},${yOf(v).toFixed(2)}`).join(' ');
+            return html`
+                <span className="hl-spark">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points=${points} style=${{ stroke: color }} /></svg>
+                    <i style=${{ left: '100%', top: `${yOf(vs[vs.length - 1])}%`, background: color }}></i>
+                </span>`;
+        };
+
+        const TrendChart = ({ rows, metric, showSessions }) => {
+            const ref = useRef(null), chart = useRef(null);
+            const m = TREND_METRICS[metric];
+            // 手機轉向時重畫（直向、橫向的字級和邊界不同）
+            const [turned, setTurned] = useState(0);
+            useEffect(() => {
+                const c = chart.current = echarts.init(ref.current);
+                const onResize = () => c.resize();
+                const portrait = matchMedia('(orientation: portrait)');
+                const onTurn = () => setTurned(n => n + 1);
+                window.addEventListener('resize', onResize);
+                portrait.addEventListener('change', onTurn);
+                return () => { window.removeEventListener('resize', onResize); portrait.removeEventListener('change', onTurn); c.dispose(); };
+            }, []);
+            useEffect(() => {
+                const mPortrait = document.documentElement.classList.contains('m-portrait');
+                const mLandscape = matchMedia('(orientation: landscape) and (max-height: 600px)').matches;
+                const fontSize = mPortrait ? 24 : mLandscape ? 10 : 12;
+                // 收盤到開盤沒有資料：橫軸照筆數排，不留大片空白；盤與盤之間斷開，畫一條分隔線
+                const line = [], starts = new Set(), labels = {};
+                rows.forEach((p, i) => {
+                    const prev = rows[i - 1], newSession = !prev || sessionKey(prev) !== sessionKey(p);
+                    if (newSession && prev) line.push({ t: null, [metric]: null });
+                    if (newSession) starts.add(line.length);
+                    if (showSessions) { if (newSession) labels[line.length] = `${SLOT_DEFS[p.slot].short}\n${mdLabel(slotDate(p.week, p.slot))}`; }
+                    else if (newSession || hhmm(prev.t).slice(0, 2) !== hhmm(p.t).slice(0, 2)) labels[line.length] = hhmm(p.t);
+                    line.push(p);
+                });
+                const peak = (type, color, position, offset) => ({ type, label: { color, position, offset, fontWeight: 'bold', formatter: p => fmtTrend(p.value) } });
+                chart.current.setOption({
+                    animation: false,
+                    textStyle: { fontFamily: 'Arial' },
+                    grid: mPortrait ? { left: 112, right: 40, top: 64, bottom: showSessions ? 96 : 60 }
+                        : mLandscape ? { left: 48, right: 14, top: 18, bottom: showSessions ? 32 : 20 }
+                        : { left: 62, right: 24, top: 30, bottom: showSessions ? 46 : 30 },
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, confine: true, textStyle: { fontSize: mPortrait ? 30 : 14 },
+                        formatter: ps => {
+                            const p = ps[0] && line[ps[0].dataIndex];
+                            return p && p.t !== null ? `<b>${mdhm(p.t)}</b> ${SLOT_DEFS[p.slot].label}<br>${ps[0].marker}${m.label}：<b>${fmtTrend(p[metric])}</b>` : '';
+                        } },
+                    xAxis: { type: 'category', boundaryGap: false, data: line.map((_, i) => i), axisTick: { show: false },
+                        axisLine: { lineStyle: { color: '#cbd5e1' } },
+                        splitLine: { show: true, interval: i => starts.has(i), lineStyle: { color: '#e2e8f0' } },
+                        axisLabel: { interval: i => labels[i] !== undefined, hideOverlap: true, color: '#64748b', fontWeight: 'bold', fontSize, lineHeight: fontSize + 3, formatter: (_, i) => labels[i] || '' } },
+                    yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } },
+                        min: v => v.min - (v.max - v.min) * .1, max: v => v.max + (v.max - v.min) * .1,
+                        axisLabel: { color: '#64748b', fontWeight: 'bold', fontSize, showMinLabel: false, showMaxLabel: false, formatter: v => v.toLocaleString() } },
+                    series: [{ name: m.label, type: 'line', data: line.map(p => p[metric]), connectNulls: false, showSymbol: false,
+                        lineStyle: { width: mPortrait ? 4 : 2, color: m.color }, itemStyle: { color: m.color }, emphasis: { disabled: true },
+                        markPoint: { symbol: 'circle', symbolSize: 0, label: { show: true, fontSize: mPortrait ? 26 : mLandscape ? 10 : 12 },
+                                     data: [peak('max', '#ef4444', 'top', [0, -5]), peak('min', '#10b981', 'bottom', [0, 5])] } }]
+                }, true);
+                chart.current.resize();
+            }, [rows, metric, showSessions, turned]);
+            return html`<div ref=${ref}></div>`;
+        };
+
+        const TrendModal = ({ initial, current, onClose }) => {
+            const [metric, setMetric] = useState(initial);
+            const [range, setRange]   = useState('session');   // session = 當盤、week = 本週
+            const [pts, setPts]       = useState(null);
+            const [failed, setFailed] = useState(null);
+            const [ready, setReady]   = useState(!!window.echarts);
+            useEffect(() => { loadEcharts().then(() => setReady(true), e => setFailed(e.message)); }, []);
+            useEffect(() => {
+                const load = () => {
+                    const { week } = slotAt(tpeNow());
+                    fetchTrend(slotOpen(week, 0)).then(p => { setPts(p.filter(x => x.week === week)); setFailed(null); }, e => setFailed(e.message));
+                };
+                load();
+                const timer = setInterval(load, 120000);
+                return () => clearInterval(timer);
+            }, []);
+            useEffect(() => {
+                const onKey = e => { if (e.key === 'Escape') onClose(); };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [onClose]);
+
+            const last = pts && pts.length ? pts[pts.length - 1] : null;
+            const rows = !last ? [] : range === 'week' ? pts : pts.filter(p => sessionKey(p) === sessionKey(last));
+            const sub = !last ? '' : range === 'week' ? `本週 ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}` : `${SLOT_DEFS[last.slot].label} ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}`;
+            const msg = failed ? `${failed}，稍後再試` : !pts || !ready ? '載入中…' : !rows.length ? '這一週還沒有走勢資料' : null;
+            const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
+
+            return ReactDOM.createPortal(html`
+                <div className="tr-back" onClick=${e => { if (e.target === e.currentTarget) onClose(); }}>
+                    <div className="tr-panel" role="dialog" aria-modal="true" aria-label=${`${TREND_METRICS[metric].label}走勢圖`}>
+                        <div className="tr-head">
+                            <span className="tr-title">${TREND_METRICS[metric].label}</span>
+                            <span className="tr-value font-mono-data">${current[metric]}</span>
+                            <span className="tr-sub">${sub}</span>
+                            <span className="tr-note">每 2 分鐘一筆，已濾掉資料跳點，可能和即時數字略有差距</span>
+                        </div>
+                        <div className="tr-controls">
+                            <div className="tr-group">${Object.keys(TREND_METRICS).map(k => tab(metric === k, TREND_METRICS[k].label, () => setMetric(k)))}</div>
+                            <div className="tr-group">${tab(range === 'session', '當盤', () => setRange('session'))}${tab(range === 'week', '本週', () => setRange('week'))}</div>
+                            <button type="button" className="tr-close" onClick=${onClose}>✕ 關閉</button>
+                        </div>
+                        <div className="tr-chart">
+                            ${msg ? html`<div className="tr-msg">${msg}</div>` : html`<${TrendChart} rows=${rows} metric=${metric} showSessions=${range === 'week'} />`}
+                        </div>
+                    </div>
+                </div>`, document.body);
+        };
+
         const getCellStyle = (header, cell) => {
             const val = cell || '';
             const isNeg  = isNegative(val);
@@ -310,6 +559,20 @@
             // 收完的盤 + 最新快照：給上面總表算「當盤獲利」、給下面每盤績效表用
             const [sessions, setSessions]       = useState([]);
             const [live, setLive]               = useState(null);
+            // 頁首微型走勢（當盤）；trendKey = 目前放大的是哪一張圖
+            const [trend, setTrend]             = useState([]);
+            const [trendKey, setTrendKey]       = useState(null);
+            const closeTrend = useCallback(() => setTrendKey(null), []);
+
+            useEffect(() => {
+                const load = () => {
+                    const { week, slot } = slotAt(tpeNow());
+                    fetchTrend(slotOpen(week, slot)).then(setTrend, () => {});
+                };
+                load();
+                const timer = setInterval(load, 120000);
+                return () => clearInterval(timer);
+            }, []);
 
             const loadSessions = useCallback(async () => {
                 const t = Date.now();
@@ -576,15 +839,18 @@
 
             const pointsChangeNum = parseFloat(topStats.pointsChange);
             const pointsChangeFormatted = pointsChangeNum > 0 ? '+' + topStats.pointsChange : topStats.pointsChange;
+            const trendCell = (key, value, valueClass) => html`
+                <button type="button" key=${key} onClick=${() => setTrendKey(key)} title=${`放大${TREND_METRICS[key].label}走勢圖`}
+                        className="hl-cell hl-btn flex-1 lg:flex-none flex flex-col items-center justify-center text-center">
+                    <span className="hl-label">${TREND_METRICS[key].label} ›</span>
+                    <span className="hl-body">
+                        <span className=${valueClass + " font-mono-data"}>${value}</span>
+                        <${Sparkline} values=${trend.map(p => p[key])} color=${TREND_METRICS[key].spark} />
+                    </span>
+                </button>`;
             const statCells = html`
-                <div className="hl-cell flex-1 lg:flex-none flex flex-col items-center justify-center text-center">
-                    <span className="hl-label">時間價值</span>
-                    <span className="hl-tv font-mono-data">${topStats.timeValue}</span>
-                </div>
-                <div className="hl-cell flex-1 lg:flex-none flex flex-col items-center justify-center text-center">
-                    <span className="hl-label">期貨指數</span>
-                    <span className="hl-fut font-mono-data">${topStats.futureIndex}</span>
-                </div>
+                ${trendCell('tv', topStats.timeValue, 'hl-tv')}
+                ${trendCell('fut', topStats.futureIndex, 'hl-fut')}
                 <div className=${"hl-cell flex-1 lg:flex-none flex flex-col items-center justify-center text-center " + (pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '')}>
                     <span className="hl-label">漲跌</span>
                     <div className="hl-chg font-mono-data">
@@ -613,7 +879,7 @@
                             </div>
                             <div className="flex divide-x divide-slate-800 bg-slate-900 border-t border-slate-800 lg:border-t-0">
                                 ${statCells}
-                                <button onClick=${handleManualRefresh} disabled=${refreshing} className="px-4 py-1.5 flex flex-col items-center justify-center text-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer">
+                                <button onClick=${handleManualRefresh} disabled=${refreshing} className="hl-refresh px-4 py-1.5 flex flex-col items-center justify-center text-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer">
                                     <span className=${"text-base leading-none " + (refreshing ? 'animate-spin inline-block' : '')}>↻</span>
                                     <span className="text-[8px] font-bold uppercase mt-1 leading-none">刷新</span>
                                 </button>
@@ -650,6 +916,8 @@
                         ${mainContent}
                     </main>
                     <${SessionPanel} sessions=${sessions} live=${live} />
+                    <button type="button" id="trend-btn" onClick=${() => setTrendKey('tv')}>走勢圖</button>
+                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: topStats.timeValue, fut: topStats.futureIndex }} onClose=${closeTrend} />`}
                 </div>`;
         };
 
