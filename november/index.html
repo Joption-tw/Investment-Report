@@ -97,7 +97,9 @@
   .sess.on .vol.img:hover { background: rgba(255,255,255,.15); }
 
   #chartCard { padding: 8px 16px 6px; display: flex; flex-direction: column; min-height: 0; }
-  #chips { display: flex; gap: 4px 5px; flex-wrap: wrap; align-items: center; justify-content: center; margin-bottom: 5px; }
+  #chips { display: flex; flex-direction: column; gap: 4px; margin-bottom: 5px; }
+  .chipRow { display: flex; gap: 4px 5px; flex-wrap: wrap; align-items: center; justify-content: center; }
+  .chipRow.main { flex-wrap: nowrap; }      /* 上排固定六條 */
   #chips .hint { font-size: 10px; font-weight: 900; color: #94a3b8; margin-right: 2px; }
   .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 2px solid #e2e8f0; border-radius: 999px; background: #fff; color: #94a3b8; font-size: 11px; font-weight: 900; }
   .chip::before { content: ''; width: 10px; height: 10px; border: 2px solid var(--c); border-radius: 50%; }
@@ -105,11 +107,18 @@
   .chip:active { transform: scale(.95); }
   .chip.on { background: var(--c); border-color: var(--c); color: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .1); }
   .chip.on::before { background: #fff; border-color: #fff; }
-  .chip.on { order: -1; }                   /* 選中的線排最前面，即時數字都在一起 */
-  #chips .hint { order: -2; }
   .chip b { font-family: Arial, sans-serif; font-size: 15px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
   .chip small { font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; opacity: .85; font-variant-numeric: tabular-nums; }
   .chip b:empty, .chip small:empty { display: none; }
+  @media (max-width: 1280px) {              /* 寬度不夠：收掉區間漲跌（滑鼠移上去看），上排還是一排六條 */
+    .chipRow.main .hint, .chip small { display: none; }
+    .chip b { font-size: 13px; }
+    .chipRow:not(.main) .chip { padding: 3px 6px; gap: 3px; font-size: 10.5px; }
+  }
+  @media (max-width: 1000px) {              /* 再窄就上排排成 3 × 2 */
+    .chipRow.main { display: grid; grid-template-columns: repeat(3, 1fr); }
+    .chipRow.main .chip { justify-content: center; }
+  }
   #toolRow { display: flex; gap: 4px 8px; flex-wrap: wrap; align-items: center; justify-content: center; margin-bottom: 4px; }
   .btn { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border: 1.5px solid #e2e8f0; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 900; white-space: nowrap; }
   .btn:hover { background: #e2e8f0; }
@@ -240,7 +249,10 @@
   html.m-portrait .sess .vol, html.m-portrait .sess .vol.img .see { font-size: 14px; }
   html.m-portrait .chip { font-size: 18px; padding: 7px 14px; }
   html.m-portrait .chip b { font-size: 26px; }
-  html.m-portrait .chip small { font-size: 15px; }
+  html.m-portrait .chip small { display: inline; font-size: 15px; }
+  html.m-portrait .chip small:empty { display: none; }
+  html.m-portrait .chipRow.main { display: grid; grid-template-columns: repeat(3, 1fr); }
+  html.m-portrait .chipRow.main .chip { justify-content: center; }
   html.m-portrait #chips .hint { font-size: 15px; }
   html.m-portrait .btn, html.m-portrait #lowBar, html.m-portrait #zReset { font-size: 16px; }
   html.m-portrait .sheet-head h2 { font-size: 24px; }
@@ -281,7 +293,8 @@
 
     /* 圖表卡：撐滿剩餘高度；選線鈕擠成一行，其他工具收起來 */
     #chartCard { flex: 1 1 auto; padding: 2px; }
-    #chips { flex: 0 0 auto; flex-wrap: nowrap; justify-content: flex-start; gap: 3px; margin: 0; overflow-x: auto; scrollbar-width: none; }
+    .chipRow, .chipRow.main { display: contents; }
+    #chips { flex: 0 0 auto; flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; gap: 3px; margin: 0; overflow-x: auto; scrollbar-width: none; }
     #chips::-webkit-scrollbar { display: none; }
     #chips .hint, #toolRow, #eraseBar { display: none !important; }
     .chip { flex: 0 0 auto; min-height: 24px; padding: 0 7px; font-size: 10px; white-space: nowrap; border-width: 1.5px; gap: 3px; }
@@ -1043,8 +1056,9 @@ function loadTable(table, name) {
 
 // ───────────── 介面 ─────────────
 function buildChips() {
-  $('chips').innerHTML = '<span class="hint">顯示線條</span>' + D.series.map((s, i) =>
-    `<button class="chip${s.on ? ' on' : ''}" style="--c:${s.color}" data-i="${i}">${s.name}<b></b><small></small></button>`).join('');
+  const chip = (s, i) => `<button class="chip${s.on ? ' on' : ''}" style="--c:${s.color}" data-i="${i}">${s.name}<b></b><small></small></button>`;
+  const row = main => D.series.map((s, i) => !!KNOWN[s.name] === main ? chip(s, i) : '').join('');
+  $('chips').innerHTML = `<div class="chipRow main"><span class="hint">顯示線條</span>${row(true)}</div><div class="chipRow">${row(false)}</div>`;
 }
 // 改「最低 N 點」→ 立刻重算膨脹率
 // 膨脹率分區：門檻與顏色（低門檻要小於高門檻才套用）
