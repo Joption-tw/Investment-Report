@@ -59,10 +59,24 @@
         .live-indicator { animation: pulse-soft 2s infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* 換頁鈕只在手機橫向出現；打橫提示只在手機直向出現 */
-        #page-btn, #rotate-hint { display: none; }
+        /* 打橫提示只在手機直向出現 */
+        #rotate-hint { display: none; }
         /* 可放大的頁面上，按鈕要關掉雙擊縮放，否則連按會被當成縮放手勢 */
         button, a, select { touch-action: manipulation; }
+
+        /* ===== 電腦與手機橫向：分兩頁，第 1 頁數字 + 走勢圖、第 2 頁每盤績效表；手機直向整份一頁 ===== */
+        html:not(.m-portrait) #page-session { display: none; }
+        html:not(.m-portrait) body.m-page-2 #app-root > *:not(header) { display: none !important; }
+        html:not(.m-portrait) body.m-page-2 #app-root > #page-session { display: block !important; }
+        html:not(.m-portrait) #app-root { padding-bottom: 72px; }
+        /* 換頁鈕放右下角並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
+        #page-btn { display: none; }
+        html:not(.m-portrait) #page-btn { display: inline-flex; align-items: center; justify-content: center; position: fixed; z-index: 60;
+                    right: max(10px, env(safe-area-inset-right)); bottom: calc(max(6px, env(safe-area-inset-bottom)) + 8px);
+                    min-width: 108px; min-height: 44px; padding: 0 14px; border-radius: 12px; background: #1e293b; color: #fff; font-size: 14px; font-weight: 900; white-space: nowrap;
+                    box-shadow: 0 2px 10px rgba(15, 23, 42, .35); cursor: pointer; }
+        #page-btn:hover { background: #334155; }
+        #page-btn:active { background: #2563eb; transform: scale(.96); }
 
         /* ===== 手機直向：整份一頁（圖表撐滿剩餘高度），字放大 ===== */
         html.m-portrait #app-root { min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; padding: 6px !important; }
@@ -88,7 +102,7 @@
         html.m-portrait #win-strip span { font-size: 14px !important; }
         html.m-portrait #win-strip .h-9 { font-size: 20px !important; }
 
-        /* ===== 手機橫向（打橫）：兩頁，第 1 頁數字 + 走勢圖、第 2 頁每盤績效表；版面固定貼齊可視範圍，換頁鈕在右下角 ===== */
+        /* ===== 手機橫向（打橫）：版面固定貼齊可視範圍 ===== */
         @media (orientation: landscape) and (max-height: 600px) {
             html, body { height: 100%; overflow: hidden !important; }
 
@@ -134,8 +148,7 @@
             #line-picker button { flex: 0 0 auto; min-height: 24px; padding: 0 7px !important; font-size: 10px !important; white-space: nowrap; border-width: 1.5px !important; }
             #performance-chart { flex: 1 1 auto !important; height: auto !important; min-height: 0 !important; }
 
-            /* 第 2 頁：每盤績效表（第 1 頁是圖表）；勝敗條跟表格的勝負欄重複，收起來把空間留給表格 */
-            #page-session { display: none; }
+            /* 第 2 頁：勝敗條跟表格的勝負欄重複，收起來把空間留給表格 */
             #win-strip { display: none; }
             #page-session > div:first-child { padding: 1px 8px !important; }
             #page-session h2 { font-size: 12px !important; white-space: nowrap; }
@@ -149,19 +162,16 @@
             #page-session td div + div { font-size: 8px !important; line-height: 1 !important; }
             #page-session td .h-7 { width: 22px !important; height: 16px !important; font-size: 10px !important; }
             body.m-page-2 #app-root { overflow-y: auto; padding-bottom: 64px !important; }
-            body.m-page-2 #app-root > *:not(header) { display: none !important; }
-            body.m-page-2 #app-root > #page-session { display: block !important; }
 
             /* 操作鈕都放最下面並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
             /* 左下回總表；右下同步數據、換頁；圖表的時間軸和拉桿會讓開（見 PerfChart） */
-            #page-btn, header > a, header > div:last-child button {
+            header > a, header > div:last-child button {
                         display: inline-flex; align-items: center; justify-content: center; position: fixed; z-index: 60;
                         bottom: calc(max(6px, env(safe-area-inset-bottom)) + 8px);
                         min-height: 44px; border-radius: 12px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 10px rgba(15, 23, 42, .35); }
-            #page-btn { right: max(10px, env(safe-area-inset-right)); min-width: 108px; padding: 0 14px; background: #1e293b; color: #fff; font-size: 14px; }
             header > div:last-child button { right: calc(max(10px, env(safe-area-inset-right)) + 114px); width: 104px; padding: 0 !important; font-size: 13px !important; }
             header > a { left: max(10px, env(safe-area-inset-left)); width: 76px; padding: 0 !important; font-size: 13px !important; align-self: auto !important; }
-            #page-btn:active, header > div:last-child button:active, header > a:active { background: #2563eb; transform: scale(.96); }
+            header > div:last-child button:active, header > a:active { background: #2563eb; transform: scale(.96); }
         }
     </style>
 </head>
@@ -177,13 +187,15 @@
         // 單一帳號的績效頁：account.html?id=<代號>（代號見 common.js 的 ACCOUNTS），版面參考 sample（示範帳戶即時績效）
         // 走勢：該帳號每 2 分鐘的「兩分鐘紀錄」＋績效表每 10 分鐘的快照（試算表只留最近的，更早的由 GitHub Actions 存到 data/series/<週>.json）
         //       期指 / 週三、週五時價取自示範帳戶試算表（每 2 分鐘）
-        // 手機橫向換頁（直向與電腦版的 CSS 不看這個 class）；回到第 1 頁時圖表要重新量尺寸（藏起來時量不到）
+        // 換頁：電腦與手機橫向分兩頁（手機直向整份一頁，CSS 不看這個 class）；回到第 1 頁時圖表要重新量尺寸（藏起來時量不到）
         let mobilePage = 1;
         function setMobilePage(n) {
             mobilePage = n;
             document.body.classList.toggle('m-page-2', n === 2);
             document.getElementById('page-btn').innerText = n === 2 ? '◀ 上一頁' : '下一頁 ▶';
-            document.getElementById('app-root').scrollTop = 0;
+            const root = document.getElementById('app-root');
+            if (root) root.scrollTop = 0;
+            window.scrollTo(0, 0);
             if (n === 1) window.dispatchEvent(new Event('resize'));
         }
 
@@ -689,7 +701,7 @@
                         </div>
                         <div id="win-strip"><${WinStrip} rows=${rows} selected=${cur} onPick=${pick} /></div>
                         <${SessionTable} rows=${rows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
-                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換上方圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。<span className="sm:hidden">表格可左右滑動。</span></p>
+                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 
                 </div>`;

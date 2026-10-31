@@ -120,10 +120,29 @@
             .tr-tab, .tr-close { padding: 0 10px; }
         }
 
-        /* 換頁鈕只在手機橫向出現；打橫提示只在手機直向出現 */
-        #page-nav, #rotate-hint { display: none; }
+        /* 打橫提示只在手機直向出現 */
+        #rotate-hint { display: none; }
         /* 可放大的頁面上，按鈕要關掉雙擊縮放，否則連按會被當成縮放手勢 */
         button, a, select { touch-action: manipulation; }
+
+        /* ===== 電腦與手機橫向：分三頁，每頁一張表（第 1 頁總表、第 2 頁每盤績效表、第 3 頁各帳號每盤損益）；手機直向整份一頁 ===== */
+        html:not(.m-portrait) #session-panel, html:not(.m-portrait) #page-session, html:not(.m-portrait) #page-accounts { display: none; }
+        html:not(.m-portrait) body.m-page-2 main, html:not(.m-portrait) body.m-page-3 main { display: none; }
+        html:not(.m-portrait) body.m-page-2 #session-panel, html:not(.m-portrait) body.m-page-3 #session-panel { display: block; }
+        html:not(.m-portrait) body.m-page-2 #page-session, html:not(.m-portrait) body.m-page-3 #page-accounts { display: block !important; }
+        html:not(.m-portrait) #session-panel { padding-top: 16px; }
+        html:not(.m-portrait) #session-panel > div > * { margin-top: 0 !important; }
+        html:not(.m-portrait) main { padding-bottom: 72px; }
+        /* 換頁鈕放右下角並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
+        #page-nav { display: none; }
+        html:not(.m-portrait) #page-nav { display: flex; align-items: center; position: fixed; z-index: 60;
+                    right: max(10px, env(safe-area-inset-right)); bottom: calc(max(6px, env(safe-area-inset-bottom)) + 4px);
+                    min-height: 44px; border-radius: 12px; background: #1e293b; color: #fff; font-size: 14px; font-weight: 900; white-space: nowrap;
+                    box-shadow: 0 2px 10px rgba(15, 23, 42, .35); }
+        #page-nav button { width: 48px; height: 44px; color: #fff; font-size: 15px; font-weight: 900; border-radius: 12px; cursor: pointer; }
+        #page-nav button:hover { background: #334155; }
+        #page-nav button:active { background: #2563eb; }
+        #page-nav button:disabled { color: #64748b; background: none; cursor: default; }
 
         /* ===== 手機直向：三張表排成一頁，字放大 ===== */
         html.m-portrait #rotate-hint { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 8px 8px 0; padding: 10px 16px; border-radius: 14px;
@@ -161,7 +180,7 @@
         html.m-portrait #win-strip span { font-size: 14px !important; }
         html.m-portrait #win-strip .h-9 { font-size: 20px !important; }
 
-        /* ===== 手機橫向（打橫）：三頁，每頁一張表；版面固定貼齊可視範圍，換頁鈕在右下角 ===== */
+        /* ===== 手機橫向（打橫）：版面固定貼齊可視範圍 ===== */
         @media (orientation: landscape) and (max-height: 600px) {
             html, body { height: 100% !important; overflow: hidden !important; }
 
@@ -216,32 +235,16 @@
             #account-links span { font-size: 10px !important; }
             #account-links a { min-height: 34px; padding: 0 7px !important; font-size: 11px !important; border-radius: 8px; }
 
-            /* 每頁只顯示一張表：第 1 頁總表、第 2 頁每盤績效表、第 3 頁各帳號每盤損益 */
-            #session-panel, #page-session, #page-accounts { display: none; }
-            body.m-page-2 main, body.m-page-3 main { display: none; }
-            body.m-page-2 #session-panel, body.m-page-3 #session-panel { display: block; }
-            body.m-page-2 #page-session, body.m-page-3 #page-accounts { display: block !important; }
-
             /* 第 2、3 頁的標題列壓扁；勝敗條跟表格的勝負欄重複，收起來把空間留給表格 */
             #page-session > div:first-child, #page-accounts > div:first-child { padding: 1px 8px !important; }
             #session-panel h2 { font-size: 12px !important; white-space: nowrap; }
             #session-panel h2 ~ span, #session-panel label { font-size: 9.5px !important; }
             #session-panel select { padding: 0 4px !important; font-size: 11px !important; min-height: 22px; }
             #win-strip { display: none; }
-            #session-panel > div > * { margin-top: 0 !important; }
             #page-session td { padding: 1px 3px !important; font-size: min(var(--fit-font), 11px) !important; }
             #page-session td div + div { font-size: 8px !important; line-height: 1 !important; }
             #page-session td .h-7 { width: 22px !important; height: 16px !important; font-size: 10px !important; }
             #page-session > p { padding: 3px 8px !important; }
-
-            /* 換頁鈕放右下角並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
-            #page-nav { display: flex; align-items: center; position: fixed; z-index: 60;
-                        right: max(10px, env(safe-area-inset-right)); bottom: calc(max(6px, env(safe-area-inset-bottom)) + 4px);
-                        min-height: 44px; border-radius: 12px; background: #1e293b; color: #fff; font-size: 14px; font-weight: 900; white-space: nowrap;
-                        box-shadow: 0 2px 10px rgba(15, 23, 42, .35); }
-            #page-nav button { width: 48px; height: 44px; color: #fff; font-size: 15px; font-weight: 900; border-radius: 12px; }
-            #page-nav button:active { background: #2563eb; }
-            #page-nav button:disabled { color: #64748b; background: none; }
 
             /* 最上緣不好點，放大走勢圖的入口也放一顆在左下角 */
             #trend-btn { display: flex; align-items: center; position: fixed; z-index: 60;
@@ -284,7 +287,7 @@
         </div>
     </div>
     <script>
-        // 手機橫向換頁（直向與電腦版的 CSS 不看這個 class）
+        // 換頁：電腦與手機橫向分三頁（手機直向整份一頁，CSS 不看這個 class）
         let mobilePage = 1;
         function setMobilePage(n) {
             mobilePage = n;
@@ -293,7 +296,9 @@
             document.getElementById('page-no').innerText = `${n} / 3`;
             document.getElementById('page-prev').disabled = n === 1;
             document.getElementById('page-next').disabled = n === 3;
-            document.getElementById('app-root').scrollTop = 0;
+            const root = document.getElementById('app-root');
+            if (root) root.scrollTop = 0;
+            window.scrollTo(0, 0);
         }
 
         const { useState, useEffect, useCallback, useRef } = React;
