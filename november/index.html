@@ -217,7 +217,7 @@
     #reloadBox { flex-direction: row; align-items: center; align-self: center; }
     header h1 { font-size: 26px; }
     header h1 span { font-size: 18px; }
-    #app-root { padding: 6px; gap: 8px; }
+    #app-root { padding: 6px 6px 64px; gap: 8px; }   /* 底部留給換頁鈕，捲到底才不會蓋住拉桿 */
     #main { gap: 8px; }
     #chartCard { padding: 8px; }
   }
@@ -522,7 +522,7 @@ const INT_GRID = '時價膨脹率';         // 這條線的 Y 軸固定畫在整
 // 膨脹率分區上色：≤ lo% 用 cLo、≥ hi% 用 cHi（畫面上可改，會記住）
 const ZONE = { lo: 2, hi: 8, cLo: '#16a34a', cHi: '#dc2626' };
 try { Object.assign(ZONE, JSON.parse(localStorage.getItem('acctChart11Zone') || '{}')); } catch (e) {}
-let AXW = 74;                         // 每個 Y 軸佔的寬度（手機排版改窄，見 draw）
+let AXW = 74;                         // 每個 Y 軸佔的寬度（手機排版、窄視窗改窄，見 draw）
 const AXIS_DEC4 = { '期貨指數': 1, '總點數': 1, '時間價值': 1 };   // 這幾條的 Y 軸刻度和滑鼠提示固定顯示到小數點 4 位
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
 // 波動率（顯示在日期按鈕「剩N天」下面，也列在頁面下方的表格）：'月日': [漲跌, 最高, 最低, 開盤, 收盤]；新的日子照格式往下加
@@ -1478,10 +1478,12 @@ function pivots(vals, i0, i1) {
 
 function draw() {
   if (!D || !cv.clientWidth) return;
-  AXW = phoneLayout() ? 52 : 74;
   const W = cv.clientWidth, H = cv.clientHeight;
+  AXW = phoneLayout() || W < 900 ? 52 : 74;
   const act = D.series.filter(s => s.on);
-  const L = act.filter(s => s.side === 'L'), R = act.filter(s => s.side === 'R');
+  // 視窗太窄：每邊只留一個軸的刻度（其他線一樣用自己的刻度畫），寬度留給線
+  const axMax = W < 560 ? 1 : Infinity;
+  const L = act.filter(s => s.side === 'L').slice(0, axMax), R = act.filter(s => s.side === 'R').slice(0, axMax);
   const x0 = 14 + L.length * AXW, x1 = W - 14 - R.length * AXW, y0 = 38, y1 = H - 76;
   const span = view.b - view.a || 1;
   const xOf = i => x0 + (i - view.a) / span * (x1 - x0);
