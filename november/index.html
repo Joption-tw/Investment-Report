@@ -915,8 +915,19 @@ let sinaDay = null;
 // 放在網站上時（https）：資料從 GitHub 的 live 分支讀，每分鐘由 upload_site.js 更新；自己電腦開（file://）照舊讀本機檔案
 const LIVE_BASE = location.protocol === 'https:' ? 'https://raw.githubusercontent.com/joption-tw/Investment-Report/live/' : null;
 let liveCsvSize = -1;
+// 盤中找最新傳完的資料夾 m/YYYYMMDDHHmm/（台灣時間，從上一分鐘往回找，不查還沒傳的這一分鐘：查過不存在的檔名會被快取 60 秒）；收盤後用固定檔名
+async function liveDir() {
+  const t8 = k => new Date(Date.now() + 288e5 - k * 6e4), now = t8(0), m = now.getUTCHours() * 60 + now.getUTCMinutes();
+  if (now.getUTCDay() < 1 || now.getUTCDay() > 5 || m < 565 || m > 912) return '';
+  for (let k = 1; k <= 4; k++) {
+    const d = t8(k), p = 'm/' + d.getUTCFullYear() + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) + p2(d.getUTCHours()) + p2(d.getUTCMinutes()) + '/';
+    try { if ((await fetch(LIVE_BASE + p + 'live_acct.js', { method: 'HEAD' })).ok) return p; } catch (e) {}
+  }
+  return '';
+}
 async function loadHosted() {
-  const get = p => fetch(LIVE_BASE + p + '?t=' + Date.now(), { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(p + ' ' + r.status); return r; });
+  const dir = await liveDir();
+  const get = p => fetch(LIVE_BASE + dir + p + '?t=' + Date.now(), { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(p + ' ' + r.status); return r; });
   const js = async (p, v) => { const t = await (await get(p)).text(); window[v] = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };
   await Promise.all([js('sina_vol_data.js', 'SINA_VOL'), js('live_acct.js', 'LIVE_ACCT')].map(p => p.catch(e => console.warn(e))));
   try {
