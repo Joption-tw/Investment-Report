@@ -1,15 +1,24 @@
 // 示範帳號歷史：下單程式 conf 裡的合約紀錄（台選*.csv，每 2 分鐘一筆）→ 網站的每週存檔
-// 在 repo 根目錄執行：deno run --allow-read --allow-write --allow-net scripts/import_demo_history.ts <合約紀錄資料夾> data/demo-history（不給輸出資料夾 = 只驗算）
+// 在 repo 根目錄執行：deno run --allow-read --allow-write --allow-net scripts/import_demo_history.ts <合約紀錄資料夾> <輸出資料夾，例 data/demo-history> [demo|mtk]（輸出資料夾給空字串 = 只驗算）
 // 網站本身的存檔（data/sessions.json、data/series）從 2026-10-28 才有，這裡補更早的；同一盤以網站存檔為準
 // 週三、週五時價：示範帳戶試算表「資料暫存區」每週一欄（欄名沒有日期，下方 BA_COLS / BB_COLS 是用合約紀錄比對出來的）；
 //                 沒有的週用合約紀錄的時間價值，但紀錄只有當時交易的那一檔（週三夜盤~週五早盤是週五選、週五夜盤~下週三是週三選）
 // VIX：期交所每月每日收盤檔（只公開近幾個月，更早的已下架）
-const [SRC = 'raw', OUT = ''] = Deno.args;
+const [SRC = 'raw', OUT = '', ACCOUNT = 'demo'] = Deno.args;
 const SITE = 'data';
 const FROM_WEEK = '2025-12-31';      // 第一個含 2026 年交易日的週
 const LAST_WEEK = '2026-10-21';      // 10-28 週起網站自己有完整紀錄
-const NAME = '示範帳號';
-const BASE = 1000000;                // 起始資產一律 100 萬，跟試算表「2026歷史績效」同一個算法（沒重設的週也是）
+// demo：起始資產一律 100 萬，跟試算表「2026歷史績效」同一個算法（沒重設的週也是）
+// mtk：真實帳戶，起始資產 = 週首資產；週三夜盤的出入金（前後兩筆都空手、跳 20 萬以上）不算損益，之後才起算；
+//      5/20 08:45~17:28 帳戶總值讀到 1,000 萬上下（前後都是 2,000 萬以上），是壞資料，不用
+const ACCOUNTS: Record<string, any> = {
+  demo: { name: '示範帳號', fixedBase: 1000000, min: 300000, max: 3e6, drop: [] },
+  mtk:  { name: '聯發哥', fixedBase: null, min: 5e6, max: 1e8, drop: [['2026-05-20T05:00:00Z', '2026-05-20T17:28:59Z']] }
+};
+const CFG = ACCOUNTS[ACCOUNT];
+if (!CFG) throw new Error('不認識的帳號：' + ACCOUNT);
+const NAME = CFG.name;
+const FLOW_MIN = 200000;
 const DEMO_SHEET = '1AsY4_MJipaMp_cNLpyeXTpFGnG0FD4vWJu-SDRdvtME', STASH_GID = '1161313889';
 // 資料暫存區：欄 → 該合約格線的開始日（週三選：該週週三；週五選：前一個週五）
 // 不用的欄：65、72、77 是下一欄的部分重複；19、71 跟合約紀錄差將近一倍，來源不明
@@ -111,7 +120,8 @@ for (const name of names.sort()) {
   }
 }
 // 帳戶總值 0 / 期指 0 是剛啟動還沒讀到；其餘範圍外的是錯位或亂碼，都不要
-const inRange = raw.filter(r => r.asset && r.asset > 300000 && r.asset < 3e6 && r.fut && r.fut > 10000 && r.fut < 200000);
+const dropped = CFG.drop.map(([a, b]: string[]) => [Date.parse(a), Date.parse(b)]);
+const inRange = raw.filter(r => r.asset && r.asset > CFG.min && r.asset < CFG.max && r.fut && r.fut > 10000 && r.fut < 200000 && !dropped.some(([a, b]: number[]) => r.t >= a && r.t <= b));
 console.log(`讀入 ${raw.length} 列（壞列 ${badRows}），可用 ${inRange.length}`);
 
 // ---- 依週、依盤分組；同一盤兩個檔同時在記（換約前後程式重開）：重疊的時段只留筆數多的檔
@@ -143,12 +153,22 @@ function resolveOverlap(rows: any[]) {
 // ---- 每週：起始資產 = 週三夜盤重設後的 1,000,000；那週沒重設就用該週第一筆（照常接著算）
 const weekSessions: any[] = [], weekSeries = new Map<string, any[]>(), report: string[] = [], closedSlots: string[] = [];
 const srcCount = { sheetBA: 0, logBA: 0, sheetBB: 0, logBB: 0 };
+const flows: string[] = [];
+const weekAll = new Map<string, any[]>();
+const siteEarly = JSON.parse(await Deno.readTextFile(`${SITE}/sessions.json`)).sessions;
 for (const week of [...weeks.keys()].sort()) {
   if (week < FROM_WEEK || week > '2026-10-28') continue;
   const slotMap = weeks.get(week)!;
   const allRows = [...slotMap.values()].flat().sort((a, b) => a.t - b.t);
-  const hasReset = allRows.some(r => r.asset === BASE);
-  const base = BASE;
+  // 網站存檔已有這一週：起始資產跟它一致；否則固定值，或週首資產（週三夜盤開始交易前有出入金就從出入金之後算）
+  const siteOfWeek = siteEarly.find((s: any) => s.week === week && s.accounts.some((a: any) => a.name === NAME));
+  let flowAt = -Infinity;
+  const slot0 = (slotMap.get(0) || []).slice().sort((a, b) => a.t - b.t);
+  for (let i = 1; i < slot0.length; i++) if (!slot0[i].pts && !slot0[i - 1].pts && Math.abs(slot0[i].asset - slot0[i - 1].asset) >= FLOW_MIN) { flowAt = slot0[i].t; flows.push(`${new Date(slot0[i].t).toISOString().slice(5, 16).replace('T', ' ')} ${Math.round(slot0[i].asset - slot0[i - 1].asset)}`); }
+  weekAll.set(week, allRows);
+  const startRow = allRows.find(r => r.t >= flowAt)!;
+  const hasReset = CFG.fixedBase ? allRows.some(r => r.asset === CFG.fixedBase) : true;
+  const base = CFG.fixedBase ?? siteOfWeek?.accounts.find((a: any) => a.name === NAME).base ?? startRow.asset;
   const kept: any[] = [];
   for (let slot = 0; slot < 10; slot++) {
     const rows0 = slotMap.get(slot);
@@ -193,7 +213,7 @@ for (const week of [...weeks.keys()].sort()) {
       open: { at: new Date(first.t).toISOString().slice(0, 19).replace('T', ' '), total: Math.round(first.asset - base), accounts: { [NAME]: Math.round(first.asset - base) } },
       market: { swing: swing100(uniq.map(r => r.fut)), ba: lastChg(uniq.map(r => r.ba)), bb: lastChg(uniq.map(r => r.bb)), ...(SLOTS[slot][1] === 'D' && vixDaily.has(date) ? { vix: vixDaily.get(date) } : {}) }
     });
-    uniq.forEach(r => kept.push({ ...r, base }));
+    uniq.forEach(r => kept.push({ ...r, base, noPnl: r.t < flowAt }));
   }
   weekSeries.set(week, kept);
   report.push(`${week} ${hasReset ? '' : '(未重設) '}盤 ${weekSessions.filter(s => s.week === week).map(s => s.slot).join('')} 筆 ${kept.length}`);
@@ -201,6 +221,8 @@ for (const week of [...weeks.keys()].sort()) {
 console.log(report.join('\n'));
 console.log('視為休市的盤：', closedSlots.join(' '));
 
+const lastPnl = (w: string) => { const own = siteEarly.filter((s: any) => s.week === w && s.accounts.some((a: any) => a.name === NAME)).sort((a: any, b: any) => a.slot - b.slot).at(-1); const s = weekSessions.filter(x => x.week === w).sort((a, b) => a.slot - b.slot).at(-1); const x = own && (!s || own.slot >= s.slot) ? own : s; if (!x) return null; const a = x.accounts.find((y: any) => y.name === NAME); return a.pnl / a.base * 100; };
+console.log('週三夜盤的出入金', flows.join('；') || '無');
 console.log('時價來源（筆）', JSON.stringify(srcCount));
 const weekCover = [...new Set(weekSessions.map(s => s.week))].map(w => { const ss = weekSessions.filter(s => s.week === w); return `${w.slice(5)} BA${ss.filter(s => s.market.ba).length}/BB${ss.filter(s => s.market.bb).length}/V${ss.filter(s => s.market.vix).length}/盤${ss.length}`; });
 console.log(weekCover.join('  '));
@@ -242,10 +264,39 @@ for (const week of [...new Set(weekSessions.map(s => s.week))]) {
   console.log(`${week} 累積 ${ss.at(-1).accounts[0].pnl}  ${per.join(' ')}`);
 }
 
+// ---- 官方週績效：投資報表試算表「歷史紀錄」分頁（每週三 13:44 的快照）。7/1 週以前的起始資產多半是週五 15:00 的資產，
+//      from = 官方從第幾盤起算（比這更早的盤不算進官方累積），用「起始資產在當週紀錄裡第一次出現的時間」找
+const official: Record<string, any> = {};
+if (ACCOUNT === 'mtk') {
+  const R = parseCSV(await (await fetch('https://docs.google.com/spreadsheets/d/1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk/export?format=csv&gid=173635889')).text());
+  let cur: string | null = null;
+  for (const r of R) {
+    const st = r.slice(0, 6).find(x => /^\d{4}\/\d{1,2}\/\d{1,2} \d{1,2}:\d{2}/.test((x || '').trim()));
+    if (st) cur = st.trim();
+    if (!/[聯連]發哥/.test(r[2] || '') || !cur) continue;
+    const m = cur.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/)!;
+    const week = addDays(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`, -7);
+    const asset = num(r[12]), pnlCell = num(r[7]);
+    if (asset === null || num(r[13]) === null || week < FROM_WEEK) continue;
+    const base = pnlCell !== null ? asset - pnlCell : num(r[13])!;   // 有幾週的起始資產格被蓋掉，但獲利金額還在
+    const pnl = asset - base, rate = +(pnl / base * 100).toFixed(2);
+    const rows = weekAll.get(week) || [];
+    const hit = rows.reduce((b: any, x: any) => Math.abs(x.asset - base) < Math.abs((b?.asset ?? 1e15) - base) ? x : b, null);
+    const near = hit && Math.abs(hit.asset - base) <= 300;
+    const first = rows.find((x: any) => near && x.asset === hit.asset) || hit;
+    const late = near && first.s.slot > 0;
+    const mine = lastPnl(week);
+    const same = mine !== null && Math.abs(mine - rate) < .02;   // 跟推算相同就不用標起算時間
+    official[week] = { base, asset, pnl, rate, from: late && !same ? first.s.slot : 0,
+      start: late && !same ? new Date(first.t).toISOString().slice(5, 16).replace('T', ' ').replace(/^0/, '').replace('-', '/') : null, same };
+  }
+  console.log(`官方週績效 ${Object.keys(official).length} 週，和推算相同 ${Object.values(official).filter((o: any) => o.same).length} 週`);
+}
+
 if (OUT) {
   await Deno.mkdir(OUT, { recursive: true });
   const sessions = weekSessions.filter(s => s.week <= LAST_WEEK && !site.some((x: any) => x.week === s.week && x.slot === s.slot));
-  await Deno.writeTextFile(`${OUT}/sessions.json`, JSON.stringify({ source: 'conf 合約紀錄（台選*.csv）', sessions }) + '\n');
+  await Deno.writeTextFile(`${OUT}/sessions.json`, JSON.stringify({ source: 'conf 合約紀錄（台選*.csv）', sessions, ...(ACCOUNT === 'mtk' ? { official } : {}) }) + '\n');
   // 走勢：網站存檔已有的時段不重複（10-21 週的最後一盤）
   const siteFirst = new Map<string, number>();
   for await (const e of Deno.readDir(`${SITE}/series`)) {
@@ -257,12 +308,12 @@ if (OUT) {
     if (week > LAST_WEEK || !rows.length) continue;
     const cut = siteFirst.get(week) ?? Infinity;
     const use = rows.filter((r: any) => r.t < cut);
-    const pnl = (r: any) => Math.round(r.asset - r.base);
+    const pnl = (r: any) => r.noPnl ? null : Math.round(r.asset - r.base);
     const data = {
       week, t: use.map((r: any) => new Date(r.t).toISOString().slice(0, 19).replace('T', ' ')), fut: use.map((r: any) => +r.fut.toFixed(1)),
       ba: use.map((r: any) => r.ba === null ? null : Math.round(r.ba)), bb: use.map((r: any) => r.bb === null ? null : Math.round(r.bb)),
       acc: { [NAME]: {
-        pnl: use.map(pnl), rate: use.map((r: any) => +(pnl(r) / r.base * 100).toFixed(2)), base: use.map((r: any) => r.base), asset: use.map((r: any) => Math.round(r.asset)),
+        pnl: use.map(pnl), rate: use.map((r: any) => r.noPnl ? null : +(pnl(r)! / r.base * 100).toFixed(2)), base: use.map((r: any) => r.base), asset: use.map((r: any) => Math.round(r.asset)),
         pts: use.map((r: any) => Math.round(r.pts ?? 0)), tv: use.map((r: any) => r.tv === null ? null : Math.round(r.tv)), ratio: use.map((r: any) => r.ratio),
         delta: use.map((r: any) => r.delta), margin: use.map((r: any) => r.margin === null ? null : Math.round(r.margin / r.asset * 100))
       } }

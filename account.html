@@ -202,8 +202,9 @@
         const { useState, useEffect, useCallback, useRef } = React;
         const params = new URLSearchParams(location.search);
         const ACCT = ACCOUNTS.find(a => a.id === params.get('id')) || accountOf(params.get('name'));
-        // 示範帳號 2026 年起的歷史：下單程式的合約紀錄 + 試算表的時間價值 + 期交所 VIX（scripts/import_demo_history.ts），只有這個帳號有；同一盤以網站存檔為準
-        const HISTORY_DIR = ACCT && ACCT.id === 'demo' ? 'data/demo-history' : null;
+        // 2026 年起的歷史：下單程式的合約紀錄 + 試算表的時間價值 + 期交所 VIX（scripts/import_demo_history.ts），只有這些帳號有；同一盤以網站存檔為準
+        const HISTORY_DIRS = { demo: 'data/demo-history', mtk: 'data/mtk-history' };
+        const HISTORY_DIR = (ACCT && HISTORY_DIRS[ACCT.id]) || null;
         const HISTORY_UNTIL = '2026-10-28';   // 這一週起網站自己有完整紀錄
         const withHistory = (history, own) => {
             if (!history) return own;
@@ -420,6 +421,7 @@
             const [shown, setShownState]  = useState(loadShown);
             const setShown = v => { setShownState(v); saveShown(v); };
             const [updated, setUpdated]   = useState(null);
+            const [official, setOfficial] = useState(null); // 週 → 試算表「歷史紀錄」的週績效（只有聯發哥有）
             const [loading, setLoading]   = useState(true);
             const [copied, setCopied]     = useState(false);
 
@@ -506,6 +508,7 @@
                 const [s, sn, lg, v, er, h] = await Promise.all([getJSON(`${SESSIONS_URL}?t=${t}`), getText(`${SNAPS_URL}&t=${t}`), getText(`${LOG_URL(since)}&t=${t}`),
                                                                  getJSON(VIX_URL), getText(`${ERASE_LOG_URL}&t=${t}`), HISTORY_DIR ? getJSON(`${HISTORY_DIR}/sessions.json`) : null]);
                 if (s) setSessions(withHistory(h && h.sessions, await fillMissing(s.sessions || [], slotAt(tpeNow()).week)));
+                if (h && h.official) setOfficial(h.official);
                 if (er) setErased(parseErasures(parseCSV(er)));
                 if (sn || lg) setSnaps([...(lg ? parseLog(parseCSV(lg)) : []), ...(sn ? parseSnapshots(parseCSV(sn)) : [])].sort((a, b) => b.t - a.t));
                 setVix(parseVix(v));
@@ -574,6 +577,14 @@
             const latestSnap = isCurrent && snaps[0] ? accountView(snaps[0], name) : null;
             const rows = buildWeek(week, views, latestSnap ? { ...latestSnap, live: true } : null, (demoWeek && demoWeek.market) || {}, isCurrent ? vix : null);
             const sum = summarize(rows);
+            // 官方為主、推算為輔：週累積用官方；每盤獲利兩邊一樣不動；官方起算前的盤累積顯示「—」
+            const off = official && !isCurrent ? official[week] || null : null;
+            const offRows = !off ? rows : rows.map(r => {
+                if (!r.state || r.pending) return r;
+                const asset = r.state.total.base + r.state.total.pnl;
+                if (sum.lastRow && r.i === sum.lastRow.i) return { ...r, cum: off.rate, state: { ...r.state, total: { ...r.state.total, pnl: off.pnl } } };
+                return { ...r, cum: r.i >= off.from ? (asset - off.base) / off.base * 100 : null };
+            });
             const ptsDef = SERIES_DEFS.find(s => s.key === 'pts');
             const trades = tradeStats(week, acc.filter(p => !hidden(ptsDef, p.t)), (demoWeek && demoWeek.series) || []);
             // 走勢圖的獲利 / 獲利率每盤從 0 起算：減掉上一盤收盤時的累積獲利（跟下方每盤績效表同一個基準）
@@ -634,8 +645,8 @@
                     </div>
 
                     <div id="stats-row" className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 sm:gap-2 text-center">
-                        <${Stat} label="本週獲利" color="border-l-rose-500" sub=${last && html`<span className=${toneOf(last.pnl)}>${sgnInt(last.pnl)}</span>`}>
-                            <span className=${last ? toneOf(last.rate) : 'text-slate-300'}>${last && last.rate !== null ? sgnPct(last.rate) : '--'}</span>
+                        <${Stat} label=${off ? '本週獲利（官方）' : '本週獲利'} color="border-l-rose-500" sub=${off ? html`<span className=${toneOf(off.pnl)}>${sgnInt(off.pnl)}</span>${!off.same && sum.cum !== null ? html`<span className="text-slate-400"> · 推算 ${sgnPct(sum.cum)}</span>` : null}` : last && html`<span className=${toneOf(last.pnl)}>${sgnInt(last.pnl)}</span>`}>
+                            ${off ? html`<span className=${toneOf(off.rate)}>${sgnPct(off.rate)}</span>` : html`<span className=${last ? toneOf(last.rate) : 'text-slate-300'}>${last && last.rate !== null ? sgnPct(last.rate) : '--'}</span>`}
                         <//>
                         <${Stat} label=${wholeWeek ? '本週勝敗' : `當盤績效（${row.def.label}）`} color="border-l-amber-500"
                                  sub=${row && row.pnl !== undefined && html`<span className=${toneOf(row.pnl)}>${sgnInt(row.pnl)}</span>`}>
@@ -703,7 +714,7 @@
                     <div id="page-session" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                         <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                             <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`}</span></h2>
-                            <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, sum)}</span>
+                            <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, off ? { ...sum, cum: off.rate } : sum)}${off && !off.same && sum.cum !== null ? `（官方；推算 ${sgnPct(sum.cum)}）` : ''}</span>
                             <label className="ml-auto flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-slate-400">歷史週次
                                 <select value=${viewWeek} onChange=${e => { setViewWeek(e.target.value); setSel(null); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs font-bold text-white cursor-pointer">
                                     ${weeks.map(w => html`<option key=${w} value=${w === currentWeek ? '' : w}>${w === currentWeek ? '本週（即時）' : `${mdLabel(w)} 週`}</option>`)}
@@ -711,8 +722,8 @@
                             </label>
                         </div>
                         <div id="win-strip"><${WinStrip} rows=${rows} selected=${cur} onPick=${pick} /></div>
-                        <${SessionTable} rows=${rows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
-                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；週三、週五時價取自試算表與下單紀錄，缺的盤顯示「—」；VIX 取自期交所，只有 7 月起的資料；百點震幅是用紀錄裡的期指算的。' : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
+                        <${SessionTable} rows=${offRows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
+                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；週三、週五時價取自試算表與下單紀錄，缺的盤顯示「—」；VIX 取自期交所，只有 7 月起的資料；百點震幅是用紀錄裡的期指算的。' + (ACCT.id === 'mtk' ? '每盤獲利以下單紀錄為準，週三夜盤的出入金不算損益。' + (!off ? '這一週試算表「歷史紀錄」沒有資料，週累積以推算為準。' : off.same ? '週累積以試算表「歷史紀錄」為準，和推算相同。' : `週累積以試算表「歷史紀錄」為準（官方 ${sgnInt(off.pnl)}${off.start ? `，從 ${off.start} 起算，更早的盤不計入` : ''}）；推算從週首資產起算 ${sum.lastRow ? sgnInt(sum.lastRow.state.total.pnl) : '—'}（${sum.cum !== null ? sgnPct(sum.cum) : '—'}）。`) : '') : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 
                 </div>`;
