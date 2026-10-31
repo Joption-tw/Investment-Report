@@ -65,7 +65,7 @@
         const VERSION  = "V2.2 優化版";
         const SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
         const GID      = '103299629';
-        const RANGE    = 'C18:O30';
+        const RANGE    = 'C2:O14';
         const CSV_URL  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}&range=${RANGE}`;
 
         const RATIO_EXTREME = 0.30;
@@ -177,10 +177,14 @@
                             pointsChange:  globalRow[1] || '0',
                             percentChange: globalRow[2] || '0%'
                         });
-                        // 試算表「資產」後面那欄的標題格是數字（不是欄名），顯示成「初始金額」
+                        // 試算表的「起始資產」在網站上顯示成「初始金額」
                         const filteredHeaders = originalHeaders.filter((_, idx) => idx !== tvIdx && idx !== fiIdx)
-                            .map(h => /^-?[\d,]+(\.\d+)?$/.test(h.trim()) ? '初始金額' : h);
-                        const filteredData    = originalData.map(row => row.filter((_, idx) => idx !== tvIdx && idx !== fiIdx));
+                            .map(h => h.trim() === '起始資產' ? '初始金額' : h);
+                        // 帳號名稱不顯示「(主)」；歐大總績效兩列的「總Delta值」欄放的是個人獲利 / 總點數，不是 Delta，留白
+                        const deltaIdx = originalHeaders.findIndex(h => h.includes('總Delta值'));
+                        const filteredData = originalData.map(row => row
+                            .map((cell, idx) => idx === 0 ? cleanName(cell) : idx === deltaIdx && String(row[0]).trim().startsWith('歐大總績效') ? '' : cell)
+                            .filter((_, idx) => idx !== tvIdx && idx !== fiIdx));
                         setHeaders(filteredHeaders);
                         setData(filteredData);
                         setLastUpdated(new Date());
