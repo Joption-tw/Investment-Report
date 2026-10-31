@@ -1100,7 +1100,7 @@ $('chips').onclick = e => {
 function buildSessions() {
   const S = D.sessions, ml = s => s.label.slice(0, 5);
   $('sessions').innerHTML = S.map((s, i) =>
-    `<button class="sess${s.night ? ' night' : ''}" data-i="${i}"><span>${s.label}</span><small>剩${daysLeft(s.key)}天</small>${volBox(s.key)}</button>`).join('') +
+    `<button class="sess${s.night ? ' night' : ''}" data-i="${i}"><span>${s.label}</span><small title="${contractNote(s.key)}">剩${daysLeft(s.key)}天</small>${volBox(s.key)}</button>`).join('') +
     `<button class="sess" data-i="-1"><span>全部</span><small>${S.length ? `${ml(S[0])}~${ml(S[S.length - 1])}` : ''}</small></button>`;
 }
 function volBox(key) {
@@ -1349,12 +1349,17 @@ $('sinaDays').onclick = e => {
 };
 loadSina();
 if (!LIVE_BASE) setInterval(loadSina, 60000);   // 網站上由同步鈕的倒數觸發（tick）
-// 剩餘天數：到結算日 2026/11/25（11 月合約）還有幾天（日曆天，結算日當天為 0；過了結算日顯示 0）
-const SETTLE_DATE = Date.UTC(2026, 10, 25);
-function daysLeft(key) {
-  const k = parseInt(key), d = Date.UTC(k / 10000 | 0, (k / 100 | 0) % 100 - 1, k % 100);
-  return Math.max(0, Math.round((SETTLE_DATE - d) / 86400000));
+// 剩餘天數：到正在做的合約到期日還有幾天（日曆天）。上證 50ETF 期權每月第 4 個星期三到期（遇假日交易所會順延，這裡沒算）
+// 到期前 ROLL_DAYS 天內改算下個月的合約（10/26 離 10 月合約到期只剩 2 天，實際已經在做 11 月）
+const ROLL_DAYS = 7;
+const expiryOf = (y, m) => Date.UTC(y, m, 22 + (10 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7);
+function contractOf(key) {
+  const k = parseInt(key), y = k / 10000 | 0, m = (k / 100 | 0) % 100 - 1, day = Date.UTC(y, m, k % 100);
+  const t = new Date(Date.UTC(y, m + ((expiryOf(y, m) - day) / 86400000 <= ROLL_DAYS ? 1 : 0), 1));
+  return { day, exp: expiryOf(t.getUTCFullYear(), t.getUTCMonth()), month: t.getUTCMonth() + 1 };
 }
+function daysLeft(key) { const c = contractOf(key); return Math.round((c.exp - c.day) / 86400000); }
+function contractNote(key) { const c = contractOf(key), e = new Date(c.exp); return `${c.month}月合約，${e.getUTCMonth() + 1}/${e.getUTCDate()} 到期`; }
 $('volBody').onclick = e => { const tr = e.target.closest('tr'); if (tr) openVolImg(tr.dataset.md); };
 $('imgClose').onclick = closeVolImg;
 $('imgModal').onclick = e => { if (e.target.id === 'imgModal') closeVolImg(); };
