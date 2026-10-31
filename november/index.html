@@ -1007,7 +1007,7 @@ function loadTable(table, name) {
     for (let k = 1; k <= 3 && i + k < fx.length; k++) {
       const q = fx[i + k];
       if (q !== null && Math.abs(q - p) < Math.abs(p) * 0.005) {
-        for (let j = 0; j < k; j++) fx[i + j] = Math.round(p + (q - p) * (j + 1) / (k + 1));
+        for (let j = 0; j < k; j++) { const m = p + (q - p) * (j + 1) / (k + 1); fx[i + j] = Math.abs(p) < 100 ? +m.toFixed(4) : Math.round(m); }   // 50ETF 這種小數報價不能取整數
         break;
       }
     }
@@ -1749,10 +1749,15 @@ function draw() {
       if (!cur) segs.push(cur = []);
       cur.push([xOf(i), s.yOf(v)]);
     }
-    const trace = pts => {                                  // 用中點二次曲線讓線條圓滑
+    const trace = pts => {                                  // 單調三次曲線：圓滑、一定通過每個資料點（尖點畫到真正的高度，橡皮擦才擦得到）、不會衝過頭
       ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let k = 1; k < pts.length - 1; k++) ctx.quadraticCurveTo(pts[k][0], pts[k][1], (pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2);
-      if (pts.length > 1) ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+      const n = pts.length; if (n < 2) return;
+      const sl = []; for (let k = 0; k < n - 1; k++) sl.push((pts[k + 1][1] - pts[k][1]) / (pts[k + 1][0] - pts[k][0]));
+      const tan = k => k === 0 ? sl[0] : k === n - 1 ? sl[n - 2] : sl[k - 1] * sl[k] <= 0 ? 0 : 2 * sl[k - 1] * sl[k] / (sl[k - 1] + sl[k]);
+      for (let k = 0; k < n - 1; k++) {
+        const dx = (pts[k + 1][0] - pts[k][0]) / 3;
+        ctx.bezierCurveTo(pts[k][0] + dx, pts[k][1] + tan(k) * dx, pts[k + 1][0] - dx, pts[k + 1][1] - tan(k + 1) * dx, pts[k + 1][0], pts[k + 1][1]);
+      }
     };
     if (s.name === '獲利率') {                             // 獲利率：0% 以上紅色面積、以下綠色面積，離 0 越遠越深
       const yb = clamp(s.yOf(0), y0, y1), rgb = hexRgb(s.color), rgbLoss = hexRgb(LOSS_COLOR);
@@ -1916,11 +1921,32 @@ function setErase(n, o) {
 const xAt = i => geom.x0 + (i - view.a) / geom.span * (geom.x1 - geom.x0);
 function eachNear(s, x, y, fn) {               // 筆刷範圍內、這條線上的每一點
   const ia = Math.max(0, Math.floor(idxAt(x - ER))), ib = Math.min(D.rows.length - 1, Math.ceil(idxAt(x + ER)));
+  let near = false;
   for (let i = ia; i <= ib; i++) {
     const v = s.vals[i]; if (v === null) continue;
     const d = Math.hypot(xAt(i) - x, s.yOf(v) - y);
-    if (d <= ER) fn(i, d);
+    if (d <= ER) { fn(i, d); near = true; }
   }
+  if (near) return;
+  // 筆刷範圍內沒有資料點、但碰到兩點之間的線段（例如跳針那條直線的中段）→ 擦掉這段比較偏離附近行情的那一端
+  let a = ia; while (a > 0 && s.vals[a] === null) a--;
+  let best = null;
+  for (let i = a, p = null; i <= D.rows.length - 1; i++) {
+    if (s.vals[i] === null) continue;
+    if (p !== null) {
+      const ax = xAt(p), ay = s.yOf(s.vals[p]), bx = xAt(i), by = s.yOf(s.vals[i]), L2 = (bx - ax) ** 2 + (by - ay) ** 2;
+      const t = L2 ? clamp(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2, 0, 1) : 0, d = Math.hypot(ax + t * (bx - ax) - x, ay + t * (by - ay) - y);
+      if (d <= ER && (!best || d < best.d)) best = { d, p, i };
+    }
+    p = i;
+    if (i > ib) break;
+  }
+  if (!best) return;
+  const dev = j => {
+    const o = []; for (let k = Math.max(0, j - 6); k <= Math.min(D.rows.length - 1, j + 6); k++) if (k !== j && s.vals[k] !== null) o.push(s.vals[k]);
+    o.sort((m, n) => m - n); return o.length ? Math.abs(s.vals[j] - o[o.length >> 1]) : 0;
+  };
+  fn(dev(best.p) >= dev(best.i) ? best.p : best.i, best.d);
 }
 function nearestSeries(x, y) {
   let best = null, bd = Infinity;
