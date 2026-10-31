@@ -999,8 +999,18 @@ function loadTable(table, name) {
     });
     baseNote = ` · 獲利率每盤重新起算（${notes.join('、')}）`;
   }
-  // 期貨指數：濾掉報價跳針（連續 1~3 筆偏離超過 2%，而前後正常值彼此一致）
   const fx = cols['期貨指數'];
+  // 期貨指數：大陸股市每天 14:57~15:00 報價會跳高（比 14:57 前的最後一筆差 1% 以上），這幾筆不用，線直接連過去
+  let closeDropped = 0;
+  if (fx && !tw) {
+    let base = null;
+    rows.forEach((r, i) => {
+      if (fx[i] === null) return;
+      if (r.mins < 897) { base = fx[i]; return; }
+      if (r.mins <= 900 && base !== null && Math.abs(fx[i] - base) > base * 0.01) { fx[i] = null; (gone['期貨指數'] = gone['期貨指數'] || new Set()).add(i); closeDropped++; }
+    });
+  }
+  // 期貨指數：濾掉報價跳針（連續 1~3 筆偏離超過 2%，而前後正常值彼此一致）
   if (fx) for (let i = 1; i < fx.length - 1; i++) {
     const p = fx[i - 1];
     if (p === null || fx[i] === null || Math.abs(fx[i] - p) <= Math.abs(p) * 0.02) continue;
@@ -1060,7 +1070,7 @@ function loadTable(table, name) {
   hoverIdx = null;
   $('drop').classList.add('hidden'); $('main').classList.remove('hidden');
   $('fileTag').textContent = (name || '帳務資訊').replace(/\.(csv|xlsx|txt)$/i, '').replace(/^AccountInfo_100-$/, '大陸帳號');
-  $('subtitle').textContent = `${rows[0].full} ～ ${rows[rows.length - 1].full} · 共 ${rows.length.toLocaleString()} 筆` + (offHours ? ` · 已略過非交易時間（午休、盤前盤後）${offHours} 筆` : '') + (tvDropped ? ` · 時間價值已濾掉 ${tvDropped} 筆不準的數字` : '') + (mvFixed ? ` · 帳戶總市值已修正 ${mvFixed} 筆跳針` : '') + (erasedN ? ` · 手動擦掉 ${erasedN} 點` : '') + baseNote;
+  $('subtitle').textContent = `${rows[0].full} ～ ${rows[rows.length - 1].full} · 共 ${rows.length.toLocaleString()} 筆` + (offHours ? ` · 已略過非交易時間（午休、盤前盤後）${offHours} 筆` : '') + (tvDropped ? ` · 時間價值已濾掉 ${tvDropped} 筆不準的數字` : '') + (closeDropped ? ` · 期貨指數已濾掉尾盤跳點 ${closeDropped} 筆` : '') + (mvFixed ? ` · 帳戶總市值已修正 ${mvFixed} 筆跳針` : '') + (erasedN ? ` · 手動擦掉 ${erasedN} 點` : '') + baseNote;
   document.title = '50ETF期權績效表';
   $('lowN').value = TV_LOWN;
   $('lowBar').classList.toggle('hidden', !series.some(s => s.name === '時價膨脹率'));
