@@ -3,7 +3,7 @@
 // 網站本身的存檔（data/sessions.json、data/series）從 2026-10-28 才有，這裡補更早的；同一盤以網站存檔為準
 // 週三、週五時價：示範帳戶試算表「資料暫存區」每週一欄（欄名沒有日期，下方 BA_COLS / BB_COLS 是用合約紀錄比對出來的）；
 //                 沒有的週用合約紀錄的時間價值，但紀錄只有當時交易的那一檔（週三夜盤~週五早盤是週五選、週五夜盤~下週三是週三選）
-// VIX：期交所每月每日收盤檔（只公開近幾個月，更早的已下架）
+// VIX：期交所每月每日收盤檔（只公開近幾個月）；更早的月份從網路存檔取回，放在 data/vix-archive（2026 年 1、5、6 月找不到）
 const [SRC = 'raw', OUT = '', ACCOUNT = 'demo'] = Deno.args;
 const SITE = 'data';
 const FROM_WEEK = '2025-12-31';      // 第一個含 2026 年交易日的週
@@ -88,16 +88,22 @@ const fromSheet = (m: Map<number, number>, t: number) => { for (const d of [2, 1
 // ---- 期交所每日收盤
 const vixDaily = new Map<string, { last: number; chg: number; pct: number; many: boolean }>();
 {
-  let prev: number | null = null;
+  let prev: number | null = null, prevDate = '';
+  const texts: string[] = [];
+  for (const e of [...Deno.readDirSync(`${SITE}/vix-archive`)].map(x => x.name).sort()) texts.push(new TextDecoder('big5').decode(Deno.readFileSync(`${SITE}/vix-archive/${e}`)));
   for (const ym of VIX_MONTHS) {
     const res = await fetch(`https://www.taifex.com.tw/file/taifex/Dailydownload/vix/log2data/${ym}new.txt`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    const txt = new TextDecoder('big5').decode(await res.arrayBuffer());
+    texts.push(new TextDecoder('big5').decode(await res.arrayBuffer()));
+  }
+  for (const txt of texts) {
     for (const l of txt.split(/\r?\n/)) {
       const c = l.trim().split(/\s+/);
       if (!/^\d{8}$/.test(c[0] || '') || !isFinite(+c[2])) continue;
       const v = +c[2], date = `${c[0].slice(0, 4)}-${c[0].slice(4, 6)}-${c[0].slice(6, 8)}`;
-      vixDaily.set(date, prev ? { last: v, chg: +(v - prev).toFixed(2), pct: +((v - prev) / prev * 100).toFixed(2), many: true } : { last: v, chg: 0, pct: 0, many: false });
-      prev = v;
+      // 跟上一筆隔太久（中間的月份沒資料）就不算漲跌；春節最長約 12 天
+      const near = prev !== null && (Date.parse(date) - Date.parse(prevDate)) / 864e5 <= 14;
+      vixDaily.set(date, near ? { last: v, chg: +(v - prev!).toFixed(2), pct: +((v - prev!) / prev! * 100).toFixed(2), many: true } : { last: v, chg: 0, pct: 0, many: false });
+      prev = v; prevDate = date;
     }
   }
   const ds = [...vixDaily.keys()].sort();

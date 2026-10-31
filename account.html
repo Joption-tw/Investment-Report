@@ -723,7 +723,7 @@
                         </div>
                         <div id="win-strip"><${WinStrip} rows=${rows} selected=${cur} onPick=${pick} /></div>
                         <${SessionTable} rows=${offRows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
-                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；週三、週五時價取自試算表與下單紀錄，缺的盤顯示「—」；VIX 取自期交所，只有 7 月起的資料；百點震幅是用紀錄裡的期指算的。' + (ACCT.id === 'mtk' ? '每盤獲利以下單紀錄為準，週三夜盤的出入金不算損益。' + (!off ? '這一週試算表「歷史紀錄」沒有資料，週累積以推算為準。' : off.same ? '週累積以試算表「歷史紀錄」為準，和推算相同。' : `週累積以試算表「歷史紀錄」為準（官方 ${sgnInt(off.pnl)}${off.start ? `，從 ${off.start} 起算，更早的盤不計入` : ''}）；推算從週首資產起算 ${sum.lastRow ? sgnInt(sum.lastRow.state.total.pnl) : '—'}（${sum.cum !== null ? sgnPct(sum.cum) : '—'}）。`) : '') : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
+                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；週三、週五時價取自試算表與下單紀錄，缺的盤顯示「—」；VIX 取自期交所，目前有 2～4 月與 7 月起的資料；百點震幅是用紀錄裡的期指算的。' + (ACCT.id === 'mtk' ? '每盤獲利以下單紀錄為準，週三夜盤的出入金不算損益。' + (!off ? '這一週試算表「歷史紀錄」沒有資料，週累積以推算為準。' : off.same ? '週累積以試算表「歷史紀錄」為準，和推算相同。' : `週累積以試算表「歷史紀錄」為準（官方 ${sgnInt(off.pnl)}${off.start ? `，從 ${off.start} 起算，更早的盤不計入` : ''}）；推算從週首資產起算 ${sum.lastRow ? sgnInt(sum.lastRow.state.total.pnl) : '—'}（${sum.cum !== null ? sgnPct(sum.cum) : '—'}）。`) : '') : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 
                 </div>`;
