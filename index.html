@@ -979,11 +979,15 @@
         };
 
         // ===== 每盤績效表：一週 10 盤，每一盤的勝敗（資料處理與表格在 common.js）=====
+        const PERSONAL_ROW = '__personal';
         const SessionPanel = ({ sessions, live }) => {
             const [liveMarket, setLiveMarket] = useState({});
             const [liveVix, setLiveVix]       = useState(null);
             const [viewWeek, setViewWeek]     = useState('');
+            // 補回資料的歷史週次（scripts/build_history_index.ts）：只含有補齊的帳號
+            const [history, setHistory]       = useState(null);
             const currentWeek = (live && live.week) || slotAt(tpeNow()).week;
+            useEffect(() => { fetch('data/history-index.json').then(r => r.ok ? r.json() : null).then(setHistory).catch(() => {}); }, []);
 
             const loadMarket = useCallback(async () => {
                 const week = slotAt(tpeNow()).week;
@@ -1003,12 +1007,29 @@
 
             const week = viewWeek || currentWeek;
             const isCurrent = week === currentWeek;
-            const rows = buildWeek(week, sessions, isCurrent ? live : null, isCurrent ? liveMarket : {}, isCurrent ? liveVix : null);
-            const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week)])].sort().reverse();
+            const historySessions = history ? history.sessions : [];
+            const isHistory = !isCurrent && historySessions.some(s => s.week === week);
+            const rows = buildWeek(week, isHistory ? historySessions : sessions, isCurrent ? live : null, isCurrent ? liveMarket : {}, isCurrent ? liveVix : null);
+            const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week), ...historySessions.map(s => s.week)])].sort().reverse();
             const sum = summarize(rows);
+            // 週累積以官方為主（目前只有聯發哥 7/1 週以前跟每盤加總不同）：累積欄只留最後一格，其他顯示「—」
+            const off = isHistory && history.official[week] || null;
+            const tableRows = !off ? rows : rows.map(r => {
+                if (!r.state || r.pending) return r;
+                if (sum.lastRow && r.i === sum.lastRow.i) return { ...r, cum: off.rate, state: { ...r.state, total: { ...r.state.total, pnl: off.total, personal: off.personal } } };
+                return { ...r, cum: null };
+            });
+            const historyNote = isHistory ? `這一週只補齊${history.accounts.join('、')}，合計與個人獲利只含這些帳號。${off ? '週累積以試算表「歷史紀錄」為主（聯發哥從週五起算），每盤獲利加總是推算值。' : ''}` : '';
             const accounts = [];
             sum.opened.forEach(r => r.state.accounts.forEach(a => { if (!accounts.includes(a.name)) accounts.push(a.name); }));
             const weekTag = isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`;
+
+            const weekPicker = html`
+                <label className="ml-auto flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-slate-400">歷史週次
+                    <select value=${viewWeek} onChange=${e => setViewWeek(e.target.value)} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs font-bold text-white cursor-pointer">
+                        ${weeks.map(w => html`<option key=${w} value=${w === currentWeek ? '' : w}>${w === currentWeek ? '本週（即時）' : `${mdLabel(w)} 週`}</option>`)}
+                    </select>
+                </label>`;
 
             return html`
                 <section id="session-panel" className="px-1 sm:px-4 pb-20 bg-[#f1f5f9]">
@@ -1016,16 +1037,12 @@
                         <div id="page-session" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                             <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                                 <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${weekTag}</span></h2>
-                                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, sum)}</span>
-                                <label className="ml-auto flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-slate-400">歷史週次
-                                    <select value=${viewWeek} onChange=${e => setViewWeek(e.target.value)} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs font-bold text-white cursor-pointer">
-                                        ${weeks.map(w => html`<option key=${w} value=${w === currentWeek ? '' : w}>${w === currentWeek ? '本週（即時）' : `${mdLabel(w)} 週`}</option>`)}
-                                    </select>
-                                </label>
+                                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, off ? { ...sum, cum: off.rate } : sum)}${off && sum.cum !== null ? `（官方；推算 ${sgnPct(sum.cum)}）` : ''}</span>
+                                ${weekPicker}
                             </div>
                             <div id="win-strip"><${WinStrip} rows=${rows} /></div>
-                            <${SessionTable} rows=${rows} showPersonal=${true} />
-                            <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">勝敗以全部帳號合計（眾人獲利）判定；獲利率 = 該盤獲利 ÷ 各帳號起始資產合計。紅 = 賺、綠 = 賠。<span className="sm:hidden">表格可左右滑動。</span></p>
+                            <${SessionTable} rows=${tableRows} showPersonal=${true} />
+                            <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">勝敗以全部帳號合計（眾人獲利）判定；獲利率 = 該盤獲利 ÷ 各帳號起始資產合計。紅 = 賺、綠 = 賠。${historyNote}<span className="sm:hidden">表格可左右滑動。</span></p>
                         </div>
 
                         ${accounts.length === 0 && html`<div id="page-accounts" className="hidden bg-white rounded-xl border border-slate-200 p-6 text-center text-xs font-bold text-slate-400">這一週還沒有各帳號每盤損益</div>`}
@@ -1033,7 +1050,8 @@
                             <div id="page-accounts" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                                 <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                                     <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">各帳號每盤損益<span className="text-white">${weekTag}</span></h2>
-                                    <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">點帳號名稱看該帳號的獨立績效頁</span>
+                                    <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">點帳號名稱看該帳號的獨立績效頁${isHistory ? `；這一週只有${history.accounts.join('、')}` : ''}</span>
+                                    ${weekPicker}
                                 </div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left">
@@ -1046,23 +1064,30 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            ${[...accounts, null].map(name => {
-                                                const isTotal = name === null;
-                                                const vals = rows.map(r => r.pending || r.pnl === undefined ? undefined : isTotal ? r.pnl : r.acc[name]);
+                                            ${[...accounts, null, PERSONAL_ROW].map(name => {
+                                                const isTotal = name === null, isPersonal = name === PERSONAL_ROW, isSum = isTotal || isPersonal;
+                                                const vals = rows.map(r => {
+                                                    if (r.pending || r.pnl === undefined) return undefined;
+                                                    if (isPersonal) return r.personal === null ? undefined : r.personal;
+                                                    return isTotal ? r.pnl : r.acc[name];
+                                                });
                                                 const w = vals.filter(v => resultOf(v) === 'win').length, l = vals.filter(v => resultOf(v) === 'lose').length;
                                                 const lastAcc = sum.lastRow && sum.lastRow.state.accounts.find(a => a.name === name);
-                                                const cumVal = !sum.lastRow ? null : isTotal ? sum.lastRow.state.total.pnl : lastAcc ? lastAcc.pnl : null;
-                                                const acct = !isTotal && accountOf(name);
+                                                const calcVal = !sum.lastRow ? null : isTotal ? sum.lastRow.state.total.pnl : isPersonal ? sum.lastRow.state.total.personal : lastAcc ? lastAcc.pnl : null;
+                                                // 官方數字為主，跟推算不同時小字標推算
+                                                const offVal = !off ? undefined : isTotal ? off.total : isPersonal ? off.personal : off.acc[name];
+                                                const cumVal = offVal !== undefined ? offVal : calcVal;
+                                                const acct = !isSum && accountOf(name);
                                                 return html`
-                                                    <tr key=${name || '__total'} className=${isTotal ? 'bg-slate-50 font-black' : ''}>
-                                                        <td className=${TD + " sticky left-0 z-10 text-center " + (isTotal ? 'bg-slate-50 text-slate-900' : 'bg-white text-slate-700')}>
-                                                            ${isTotal ? '合計（眾人）' : acct ? html`<a href=${accountUrl(acct)} className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${name}</a>` : name}
+                                                    <tr key=${name || '__total'} className=${isSum ? 'bg-slate-50 font-black' : ''}>
+                                                        <td className=${TD + " sticky left-0 z-10 text-center " + (isSum ? 'bg-slate-50 text-slate-900' : 'bg-white text-slate-700')}>
+                                                            ${isTotal ? '合計（眾人）' : isPersonal ? '個人獲利' : acct ? html`<a href=${accountUrl(acct)} className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${name}</a>` : name}
                                                         </td>
                                                         ${vals.map((v, k) => {
                                                             const res = resultOf(v);
                                                             return html`<td key=${k} className=${TD + " text-right " + (res ? RESULT[res].cell : 'text-slate-300')}>${v !== undefined ? sgnInt(v) : ''}</td>`;
                                                         })}
-                                                        <td className=${TD + " text-right font-black " + toneOf(cumVal)}>${cumVal !== null ? sgnInt(cumVal) : '—'}</td>
+                                                        <td className=${TD + " text-right font-black leading-tight " + toneOf(cumVal)}>${cumVal !== null ? sgnInt(cumVal) : '—'}${offVal !== undefined && calcVal !== null && offVal !== calcVal ? html`<div className="text-[10px] font-bold text-slate-400">推算 ${sgnInt(calcVal)}</div>` : null}</td>
                                                         <td className=${TD + " text-center"}><span className="text-red-600">${w}勝</span> <span className="text-emerald-600">${l}敗</span></td>
                                                     </tr>`;
                                             })}
