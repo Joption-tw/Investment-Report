@@ -75,12 +75,21 @@
 
   /* ===== 第 1 頁：盤別鈕、選線鈕（含即時數字）、圖表 ===== */
   #main { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-  #session-row { padding: 5px; }
-  #sessions { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 4px; }
+  /* 盤別區高度固定：放得下就平分整排；放不下時一次顯示整數張、其他左右捲，「全部」固定在最右邊（寬度由 fitSessions 算） */
+  #session-row { position: relative; padding: 5px; }
+  #sessions { --smin: 156; position: relative; display: flex; gap: 4px; height: 72px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  #sessions::-webkit-scrollbar { display: none; }
+  #sessions .sess { flex: 0 0 var(--sw, 156px); height: 100%; scroll-snap-align: start; overflow: hidden; }
+  #sessions .sess[data-i="-1"] { position: sticky; right: 0; z-index: 2; scroll-snap-align: none; }
+  #sessions.over .sess[data-i="-1"] { box-shadow: -5px 0 6px -3px rgba(15,23,42,.18); }
+  .sessArrow { position: absolute; top: 50%; z-index: 3; width: 24px; height: 44px; margin-top: -22px; padding: 0; border: 0; border-radius: 8px; background: rgba(15,23,42,.72); color: #fff; font-size: 18px; font-weight: 900; line-height: 1; }
+  .sessArrow:hover { background: #0f172a; }
+  #sessPrev { left: 8px; }
+  #sessNext { right: calc(var(--sw, 156px) + 12px); }
   .sess { display: flex; flex-flow: row wrap; align-items: baseline; align-content: center; justify-content: center; column-gap: 5px; row-gap: 1px; min-width: 0; padding: 4px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; color: #64748b; font-size: 11px; font-weight: 800; line-height: 1.25; user-select: none; }
   .sess:hover { border-color: #94a3b8; }
   .sess small { font-size: 9px; font-weight: 700; color: #94a3b8; }
-  .sess .pnl, .sess .vol { flex: 0 0 100%; text-align: center; }
+  .sess .pnl, .sess .vol { flex: 0 0 100%; text-align: center; white-space: nowrap; }
   .sess .pnl { font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .sess .pnl.up { color: #dc2626; } .sess .pnl.dn { color: #059669; }
   .sess .vol { display: block; width: 100%; padding: 2px; border-top: 1px dashed #e2e8f0; font-size: 9px; font-weight: 600; line-height: 1.35; color: #64748b; font-variant-numeric: tabular-nums; }
@@ -90,17 +99,30 @@
   .sess .vol.img { cursor: zoom-in; }
   .sess .vol.img:hover { background: #eff6ff; }
   .sess .vol .see { color: #2563eb; }
-  .sess.on { background: #f97316; color: #fff; border-color: #ea580c; transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(249,115,22,.2); }
+  .sess.on { background: #f97316; color: #fff; border-color: #ea580c; }
   .sess.night.on { background: #1e293b; border-color: #0f172a; }
   .sess.on small, .sess.on .pnl, .sess.on .pnl.up, .sess.on .pnl.dn, .sess.on .vol, .sess.on .vol .up, .sess.on .vol .dn, .sess.on .vol .see { color: #fff; }
   .sess.on .vol { border-top-color: rgba(255,255,255,.4); }
   .sess.on .vol.img:hover { background: rgba(255,255,255,.15); }
 
   #chartCard { padding: 8px 16px 6px; display: flex; flex-direction: column; min-height: 0; }
-  #chips { display: flex; flex-direction: column; gap: 4px; margin-bottom: 5px; }
-  .chipRow { display: flex; gap: 4px 5px; flex-wrap: wrap; align-items: center; justify-content: center; }
-  .chipRow.main { flex-wrap: nowrap; }      /* 上排固定六條 */
-  #chips .hint { font-size: 10px; font-weight: 900; color: #94a3b8; margin-right: 2px; }
+  /* 選線鈕一排：寬度不夠時由 fitChips 一級一級收窄（snug → tight → tighter → tightest），還不夠才左右捲 */
+  #chips { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; overflow-x: auto; scrollbar-width: none; }
+  #chips::-webkit-scrollbar { display: none; }
+  #chips .hint { flex: 0 0 auto; margin-left: auto; font-size: 10px; font-weight: 900; color: #94a3b8; }
+  #chips .chip { flex: 0 0 auto; white-space: nowrap; user-select: none; }
+  #chips .chip:last-child { margin-right: auto; }
+  #chips .chip.dragging { opacity: .75; box-shadow: 0 4px 10px rgba(15,23,42,.3); transform: none; }
+  #chips.sorting, #chips.sorting .chip { cursor: grabbing; }
+  #chips.snug .hint { display: none; }
+  #chips.snug .chip { padding: 3px 7px; gap: 4px; }
+  #chips.snug { gap: 4px; }
+  #chips.tight .chip small { display: none; }
+  #chips.tighter .chip b { font-size: 13px; }
+  #chips.tightest { gap: 2px; }
+  #chips.tightest .chip { padding: 2px 4px; gap: 2px; font-size: 9.5px; border-width: 1.5px; }
+  #chips.tightest .chip::before { width: 8px; height: 8px; }
+  #chips.tightest .chip b { font-size: 11px; }
   .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 2px solid #e2e8f0; border-radius: 999px; background: #fff; color: #94a3b8; font-size: 11px; font-weight: 900; }
   .chip::before { content: ''; width: 10px; height: 10px; border: 2px solid var(--c); border-radius: 50%; }
   .chip:hover { border-color: #94a3b8; }
@@ -110,15 +132,6 @@
   .chip b { font-family: Arial, sans-serif; font-size: 15px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
   .chip small { font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; opacity: .85; font-variant-numeric: tabular-nums; }
   .chip b:empty, .chip small:empty { display: none; }
-  @media (max-width: 1280px) {              /* 寬度不夠：收掉區間漲跌（滑鼠移上去看），上排還是一排六條 */
-    .chipRow.main .hint, .chip small { display: none; }
-    .chip b { font-size: 13px; }
-    .chipRow:not(.main) .chip { padding: 3px 6px; gap: 3px; font-size: 10.5px; }
-  }
-  @media (max-width: 1000px) {              /* 再窄就上排排成 3 × 2 */
-    .chipRow.main { display: grid; grid-template-columns: repeat(3, 1fr); }
-    .chipRow.main .chip { justify-content: center; }
-  }
   #toolRow { display: flex; gap: 4px 8px; flex-wrap: wrap; align-items: center; justify-content: center; margin-bottom: 4px; }
   .btn { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border: 1.5px solid #e2e8f0; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 900; white-space: nowrap; }
   .btn:hover { background: #e2e8f0; }
@@ -242,7 +255,8 @@
   html.m-portrait .rotate-hint-icon { width: 46px; height: 46px; transform: rotate(90deg); flex: none; }
   html.m-portrait header h1 { font-size: 48px; }
   html.m-portrait header h1 span { font-size: 32px; }
-  html.m-portrait #sessions { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  html.m-portrait #sessions { --smin: 190; height: 108px; }
+  html.m-portrait .sessArrow { display: none; }
   html.m-portrait .sess { font-size: 20px; }
   html.m-portrait .sess small { font-size: 15px; }
   html.m-portrait .sess .pnl { font-size: 17px; }
@@ -251,8 +265,7 @@
   html.m-portrait .chip b { font-size: 26px; }
   html.m-portrait .chip small { display: inline; font-size: 15px; }
   html.m-portrait .chip small:empty { display: none; }
-  html.m-portrait .chipRow.main { display: grid; grid-template-columns: repeat(3, 1fr); }
-  html.m-portrait .chipRow.main .chip { justify-content: center; }
+  html.m-portrait #chips { flex-wrap: wrap; justify-content: center; gap: 6px; overflow: visible; }
   html.m-portrait #chips .hint { font-size: 15px; }
   html.m-portrait .btn, html.m-portrait #lowBar, html.m-portrait #zReset { font-size: 16px; }
   html.m-portrait .sheet-head h2 { font-size: 24px; }
@@ -284,18 +297,16 @@
 
     /* 盤別鈕一整排可左右滑：只留日期和損益 */
     #session-row { padding: 1px; }
-    #sessions { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
-    #sessions::-webkit-scrollbar { display: none; }
-    .sess { flex: 1 0 74px; padding: 1px; gap: 0; font-size: 10px; line-height: 1.1; border-radius: 5px; white-space: nowrap; overflow: hidden; }
+    #sessions { --smin: 84; gap: 2px; height: 26px; }
+    .sessArrow { display: none; }
+    .sess { padding: 1px; gap: 0; font-size: 10px; line-height: 1.1; border-radius: 5px; white-space: nowrap; }
     .sess small, .sess .vol { display: none; }
     .sess .pnl { font-size: 8px; }
     .sess.on { transform: none; box-shadow: none; }
 
     /* 圖表卡：撐滿剩餘高度；選線鈕擠成一行，其他工具收起來 */
     #chartCard { flex: 1 1 auto; padding: 2px; }
-    .chipRow, .chipRow.main { display: contents; }
-    #chips { flex: 0 0 auto; flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; gap: 3px; margin: 0; overflow-x: auto; scrollbar-width: none; }
-    #chips::-webkit-scrollbar { display: none; }
+    #chips { flex: 0 0 auto; gap: 3px; margin: 0; }
     #chips .hint, #toolRow, #eraseBar { display: none !important; }
     .chip { flex: 0 0 auto; min-height: 24px; padding: 0 7px; font-size: 10px; white-space: nowrap; border-width: 1.5px; gap: 3px; }
     .chip::before { width: 8px; height: 8px; }
@@ -355,7 +366,7 @@
   </div>
 
   <div id="main" class="hidden">
-    <div id="session-row" class="glass-card"><div id="sessions"></div></div>
+    <div id="session-row" class="glass-card"><div id="sessions"></div><button id="sessPrev" class="sessArrow hidden" title="往前">‹</button><button id="sessNext" class="sessArrow hidden" title="往後">›</button></div>
     <div class="glass-card" id="chartCard">
       <div id="chips"></div>
       <div id="toolRow">
@@ -415,7 +426,7 @@
 
     <section class="sheet">
       <p class="note" id="subtitle">尚未載入檔案 · 資料只在本機瀏覽器處理，不會上傳</p>
-      <p class="note">圖表操作　X 軸：拉下方藍色拉桿的左右把手調整範圍、拖中間平移（圖內也可滾輪縮放、拖曳平移）｜ Y 軸：在刻度上往上／下拉調整範圍（上半調上限、下半調下限）、滾輪縮放、雙擊該軸回自動 ｜ 圖內雙擊：全部還原 ｜ 橡皮擦：按 E 開關、Ctrl+Z 復原</p>
+      <p class="note">選線鈕可以用滑鼠左右拖曳排順序 ｜ 盤別區放不下時，用滾輪或箭頭左右捲 ｜ 圖表操作　X 軸：拉下方藍色拉桿的左右把手調整範圍、拖中間平移（圖內也可滾輪縮放、拖曳平移）｜ Y 軸：在刻度上往上／下拉調整範圍（上半調上限、下半調下限）、滾輪縮放、雙擊該軸回自動 ｜ 圖內雙擊：全部還原 ｜ 橡皮擦：按 E 開關、Ctrl+Z 復原</p>
     </section>
   </div>
 </div>
@@ -487,7 +498,7 @@ function setMobilePage(n) {
   const root = document.getElementById('app-root');
   if (root) root.scrollTop = 0;
   window.scrollTo(0, 0);
-  if (n === 1) { window.dispatchEvent(new Event('resize')); resize(); }
+  if (n === 1) { lastOnSess = null; window.dispatchEvent(new Event('resize')); resize(); }   // 藏起來時捲動位置會歸零，回來要重新捲到選的那一盤
 }
 document.getElementById('page-btn').onclick = () => setMobilePage(mobilePage === 2 ? 1 : 2);
 // 手機排版（直向、橫向）：圖表高度交給 CSS，Y 軸排窄一點把寬度留給線
@@ -523,6 +534,8 @@ function calcInflation(clean) {
     return +((v - base) / base * 100).toFixed(2);
   });
 }
+// 不顯示的欄位：不畫線、不列選線鈕（存提款仍用來算獲利率）
+const HIDE_LINES = { '買權點數': 1, '賣權點數': 1, '買權Delta': 1, '賣權Delta': 1, '總Delta': 1, '存提款': 1, '維持率': 1 };
 const INT_GRID = '時價膨脹率';         // 這條線的 Y 軸固定畫在整數 % 關卡（1%、2%、3%…）
 // 膨脹率分區上色：≤ lo% 用 cLo、≥ hi% 用 cHi（畫面上可改，會記住）
 const ZONE = { lo: 2, hi: 8, cLo: '#16a34a', cHi: '#dc2626' };
@@ -1031,7 +1044,7 @@ function loadTable(table, name) {
   applyErase();
   if (!tw) cols['波動率(新浪)'] = sinaVals(rows);           // 新浪價平 IV 依分鐘對到每一列（之後每分鐘重新讀檔時更新）
   Object.keys(KNOWN).forEach(n => { if (cols[n]) add(n, cols[n]); });
-  Object.keys(cols).forEach(n => { if (!KNOWN[n]) add(n, cols[n]); });
+  Object.keys(cols).forEach(n => { if (KNOWN[n]) return; if (HIDE_LINES[n]) { pi++; altSide++; return; } add(n, cols[n]); });
   // 上次勾選的線（存在這台電腦的瀏覽器），重新開啟網頁也照舊顯示
   try { const saved = JSON.parse(localStorage.getItem(SERIES_KEY) || 'null'); if (saved) series.forEach(s => { if (s.name in saved) s.on = saved[s.name]; }); } catch (e) {}
   if (!series.some(s => s.on)) series.slice(0, 4).forEach(s => s.on = true);
@@ -1055,11 +1068,53 @@ function loadTable(table, name) {
 }
 
 // ───────────── 介面 ─────────────
+const CHIP_ORDER_KEY = 'acctChart11ChipOrder';
 function buildChips() {
-  const chip = (s, i) => `<button class="chip${s.on ? ' on' : ''}" style="--c:${s.color}" data-i="${i}">${s.name}<b></b><small></small></button>`;
-  const row = main => D.series.map((s, i) => !!KNOWN[s.name] === main ? chip(s, i) : '').join('');
-  $('chips').innerHTML = `<div class="chipRow main"><span class="hint">顯示線條</span>${row(true)}</div><div class="chipRow">${row(false)}</div>`;
+  let order = [];
+  try { order = JSON.parse(localStorage.getItem(CHIP_ORDER_KEY) || '[]'); } catch (e) {}
+  const rank = s => { const k = order.indexOf(s.name); return k < 0 ? order.length : k; };
+  const list = D.series.map((s, i) => ({ s, i })).sort((p, q) => rank(p.s) - rank(q.s) || p.i - q.i);   // 沒排過的照原本順序放後面
+  $('chips').innerHTML = '<span class="hint" title="按鈕可以用滑鼠左右拖曳排順序">顯示線條</span>' + list.map(({ s, i }) =>
+    `<button class="chip${s.on ? ' on' : ''}" style="--c:${s.color}" data-i="${i}">${s.name}<b></b><small></small></button>`).join('');
 }
+// 寬度不夠就一級一級收窄；內容和寬度都沒變就不重算（滑鼠移動時每次畫圖都會呼叫）
+let chipFitKey = '';
+function fitChips() {
+  const el = $('chips'), lv = ['snug', 'tight', 'tighter', 'tightest'];
+  if (!el.clientWidth) return;
+  const key = el.clientWidth + '|' + el.textContent;
+  if (key === chipFitKey) return;
+  chipFitKey = key;
+  el.classList.remove(...lv);
+  if (phoneLayout()) return;
+  for (const c of lv) { if (el.scrollWidth <= el.clientWidth) break; el.classList.add(c); }
+}
+// 滑鼠左右拖曳排順序：游標跨過隔壁按鈕的中線就換位置；放開時記住（只改按鈕順序，不影響圖上的線和 Y 軸）
+let chipDrag = null, chipDragged = false;
+$('chips').addEventListener('pointerdown', e => {
+  const c = e.target.closest('.chip');
+  if (c && e.pointerType === 'mouse' && e.button === 0) chipDrag = { c, x: e.clientX, on: false };
+});
+function endChipDrag() {
+  const d = chipDrag; chipDrag = null;
+  if (!d || !d.on) return;
+  d.c.classList.remove('dragging'); $('chips').classList.remove('sorting');
+  try { localStorage.setItem(CHIP_ORDER_KEY, JSON.stringify([...$('chips').querySelectorAll('.chip')].map(x => D.series[x.dataset.i].name))); } catch (e) {}
+  chipDragged = true; setTimeout(() => chipDragged = false, 300);     // 放開時瀏覽器還會補一個 click，不能當成按按鈕
+}
+window.addEventListener('pointermove', e => {
+  if (!chipDrag) return;
+  const { c } = chipDrag;
+  if (!c.isConnected || !e.buttons) { endChipDrag(); return; }        // 拖到一半資料更新、或在視窗外放開
+  if (!chipDrag.on) {
+    if (Math.abs(e.clientX - chipDrag.x) < 6) return;
+    chipDrag.on = true; c.classList.add('dragging'); $('chips').classList.add('sorting');
+  }
+  const after = [...$('chips').querySelectorAll('.chip')].find(x => { if (x === c) return false; const r = x.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+  if (after) { if (c.nextElementSibling !== after) $('chips').insertBefore(c, after); }
+  else if ($('chips').lastElementChild !== c) $('chips').appendChild(c);
+});
+window.addEventListener('pointerup', endChipDrag);
 // 改「最低 N 點」→ 立刻重算膨脹率
 // 膨脹率分區：門檻與顏色（低門檻要小於高門檻才套用）
 function showZoneInputs() { $('zLo').value = ZONE.lo; $('zHi').value = ZONE.hi; $('zcLo').value = ZONE.cLo; $('zcHi').value = ZONE.cHi; }
@@ -1092,16 +1147,59 @@ $('lowN').oninput = e => {
 };
 const SERIES_KEY = 'acctChart11Series';
 $('chips').onclick = e => {
-  const c = e.target.closest('.chip'); if (!c) return;
+  const c = e.target.closest('.chip'); if (!c || chipDragged) return;
   const i = c.dataset.i;
   D.series[i].on = !D.series[i].on; buildChips(); draw(); fitChart();
   try { localStorage.setItem(SERIES_KEY, JSON.stringify(Object.fromEntries(D.series.map(s => [s.name, s.on])))); } catch (err) {}
 };
+// 盤別區：放得下就平分整排；放不下時算出一次能顯示幾張整張（含最右邊固定的「全部」），其他左右捲
+const SESS_GAP = 4;
+let sessCardW = 0, sessPerView = 0, lastOnSess = null;
+function fitSessions() {
+  const el = $('sessions'), W = el.clientWidth;
+  if (!W || !D) return;
+  const gap = parseFloat(getComputedStyle(el).columnGap) || SESS_GAP, min = parseFloat(getComputedStyle(el).getPropertyValue('--smin')) || 156;
+  const total = D.sessions.length + 1;
+  sessPerView = Math.max(2, Math.min(total, Math.floor((W + gap) / (min + gap))));
+  sessCardW = (W - (sessPerView - 1) * gap) / sessPerView;
+  $('session-row').style.setProperty('--sw', sessCardW + 'px');
+  el.classList.toggle('over', total > sessPerView);
+  sessArrows();
+}
+function sessArrows() {
+  const el = $('sessions'), max = el.scrollWidth - el.clientWidth;
+  $('sessPrev').classList.toggle('hidden', max <= 1 || el.scrollLeft <= 1);
+  $('sessNext').classList.toggle('hidden', max <= 1 || el.scrollLeft >= max - 1);
+}
+// 選到的盤在畫面外就捲過去（剛開頁面時預設最新一盤，所以會停在最右邊）
+function showOnSess(btn) {
+  const el = $('sessions'), left = btn.offsetLeft, right = left + btn.offsetWidth, room = el.clientWidth - sessCardW - SESS_GAP;
+  if (left < el.scrollLeft) el.scrollLeft = left;
+  else if (right > el.scrollLeft + room) el.scrollLeft = right - room;
+}
+$('sessions').addEventListener('scroll', sessArrows, { passive: true });
+$('sessions').addEventListener('wheel', e => {
+  const el = $('sessions');
+  if (el.scrollWidth <= el.clientWidth) return;
+  e.preventDefault();
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  el.scrollBy({ left: Math.abs(d) >= 40 ? Math.sign(d) * (sessCardW + SESS_GAP) : d, behavior: Math.abs(d) >= 40 ? 'smooth' : 'auto' });   // 滑鼠滾輪一格一張；觸控板照手勢
+}, { passive: false });
+const sessPage = dir => $('sessions').scrollBy({ left: dir * (sessPerView - 1) * (sessCardW + SESS_GAP), behavior: 'smooth' });
+$('sessPrev').onclick = () => sessPage(-1);
+$('sessNext').onclick = () => sessPage(1);
+let sessViewW = window.innerWidth;
+window.addEventListener('resize', () => {                   // 寬度真的變了才重新捲到選的盤（手機網址列收合只改高度）
+  if (window.innerWidth !== sessViewW) { sessViewW = window.innerWidth; lastOnSess = null; }
+  fitSessions();
+});
 function buildSessions() {
-  const S = D.sessions, ml = s => s.label.slice(0, 5);
+  const S = D.sessions, ml = s => s.label.slice(0, 5), sl = $('sessions').scrollLeft;
   $('sessions').innerHTML = S.map((s, i) =>
     `<button class="sess${s.night ? ' night' : ''}" data-i="${i}"><span>${s.label}</span><small title="${contractNote(s.key)}">剩${daysLeft(s.key)}天</small>${volBox(s.key)}</button>`).join('') +
     `<button class="sess" data-i="-1"><span>全部</span><small>${S.length ? `${ml(S[0])}~${ml(S[S.length - 1])}` : ''}</small></button>`;
+  fitSessions();
+  $('sessions').scrollLeft = sl;
 }
 function volBox(key) {
   const md = String(key).slice(4, 8), v = VOL[md], a = dayResult(md);
@@ -1397,10 +1495,12 @@ function updateStats(i0, i1) {
     el.style.setProperty('--c', toneOf(s, last));
     el.title = `${s.name}　區間 ${ds}　低 ${fmt(lo, dec)}　高 ${fmt(hi, dec)}`;
   });
+  fitChips();
   document.querySelectorAll('.sess').forEach(b => {
     const s = D.sessions[b.dataset.i];
     const on = s ? (Math.round(view.a) === s.si && Math.round(view.b) === s.ei) : (view.a <= 0 && view.b >= D.rows.length - 1);
     b.classList.toggle('on', on && (!!s || D.sessions.length !== 1));
+    if (s && b.classList.contains('on') && lastOnSess !== b.dataset.i) { lastOnSess = b.dataset.i; showOnSess(b); }
   });
 }
 
