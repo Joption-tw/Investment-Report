@@ -3,7 +3,7 @@
 // 補了新帳號：在 HISTORY_DIRS 加一行、重跑即可。個人獲利的比例每次從試算表「績效表」H15 的公式讀，不寫在 repo 裡
 import { unzipSync, strFromU8 } from 'npm:fflate@0.8.2';
 
-const HISTORY_DIRS = ['data/demo-history', 'data/mtk-history'];
+const HISTORY_DIRS = ['data/demo-history', 'data/kgi-history', 'data/main-history', 'data/gary-history', 'data/mtk-history', 'data/mom-history'];
 const IR_SHEET = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk', IR_GID = '103299629';
 const cleanName = (s: string) => String(s || '').trim().replace(/\((主|副)\)$/, '').replace(/^連發哥$/, '聯發哥');
 
@@ -29,11 +29,12 @@ const own = JSON.parse(await Deno.readTextFile('data/sessions.json')).sessions;
 const perAccount: { name: string; sessions: any[]; official: Record<string, any> }[] = [];
 for (const dir of HISTORY_DIRS) {
   const d = JSON.parse(await Deno.readTextFile(`${dir}/sessions.json`));
-  const name = d.sessions[0].accounts[0].name;
+  const name = d.name;
   if (!(name in weight)) throw new Error(`H15 找不到帳號：${name}`);
   // 同一週網站存檔已有的盤，也要算進來（例：10-21 週最後一盤）
   const weeks = new Set(d.sessions.map((s: any) => s.week));
-  const fromSite = own.filter((s: any) => weeks.has(s.week) && s.accounts.some((a: any) => a.name === name))
+  const fixed = new Set(d.sessions.filter((s: any) => s.fix).map((s: any) => `${s.week}#${s.slot}`));   // 網站存檔把出入金算成損益的盤，以補回的為準
+  const fromSite = own.filter((s: any) => weeks.has(s.week) && !fixed.has(`${s.week}#${s.slot}`) && s.accounts.some((a: any) => a.name === name))
     .map((s: any) => ({ ...s, accounts: s.accounts.filter((a: any) => a.name === name) }));
   const has = new Set(fromSite.map((s: any) => `${s.week}#${s.slot}`));
   perAccount.push({ name, sessions: [...d.sessions.filter((s: any) => !has.has(`${s.week}#${s.slot}`)), ...fromSite], official: d.official || {} });
@@ -64,20 +65,23 @@ for (const k of ordered) {
   });
 }
 
-// ---- 週累積：有官方數字的帳號以官方為主（聯發哥 7/1 週以前官方從週五起算，跟每盤加總不同）
+// ---- 週累積：有官方數字的帳號以官方為主；有官方週績效、但沒有每盤資料的帳號也算進週累積
 const official: Record<string, any> = {};
-for (const week of new Set(sessions.map(s => s.week))) {
+const allWeeks = new Set([...sessions.map(s => s.week), ...perAccount.flatMap(p => Object.keys(p.official))]);
+for (const week of [...allWeeks].filter(w => w < '2026-10-28')) {
   const last = sessions.filter(s => s.week === week).at(-1);
-  const offs = perAccount.map(p => ({ name: p.name, o: p.official[week] })).filter(x => x.o && !x.o.same);
-  if (!offs.length) continue;
-  const acc: Record<string, number> = {}; let total = 0, personal = 0, base = 0;
-  for (const a of last.accounts) {
-    const o = offs.find(x => x.name === a.name)?.o;
+  const inSessions = new Map<string, any>((last ? last.accounts : []).map((a: any) => [a.name, a]));
+  const acc: Record<string, number> = {}, weeklyOnly: string[] = [];
+  let total = 0, personal = 0, base = 0, differs = false, start: string | null = null;
+  for (const p of perAccount) {
+    const o = p.official[week], a = inSessions.get(p.name);
+    if (!o && !a) continue;
+    if (o && !a) weeklyOnly.push(p.name);
+    if (o && (!o.same || !a)) { acc[p.name] = o.pnl; differs = true; start = start || o.start; }
     const pnl = o ? o.pnl : a.pnl;
-    if (o) acc[a.name] = o.pnl;
-    total += pnl; personal += pnl * weight[a.name]; base += o ? o.base : a.base;
+    total += pnl; personal += pnl * weight[p.name]; base += o ? o.base : a.base;
   }
-  official[week] = { acc, total: Math.round(total), personal: Math.round(personal), rate: +(total / base * 100).toFixed(2), start: offs[0].o.start };
+  if (differs) official[week] = { acc, weeklyOnly, total: Math.round(total), personal: Math.round(personal), rate: +(total / base * 100).toFixed(2), start };
 }
 
 const out = { accounts: perAccount.map(p => p.name), sessions, official };

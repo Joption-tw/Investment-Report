@@ -203,13 +203,15 @@
         const params = new URLSearchParams(location.search);
         const ACCT = ACCOUNTS.find(a => a.id === params.get('id')) || accountOf(params.get('name'));
         // 2026 年起的歷史：下單程式的合約紀錄 + 試算表的時間價值 + 期交所 VIX（scripts/import_demo_history.ts），只有這些帳號有；同一盤以網站存檔為準
-        const HISTORY_DIRS = { demo: 'data/demo-history', mtk: 'data/mtk-history' };
+        const HISTORY_DIRS = { demo: 'data/demo-history', mtk: 'data/mtk-history', kgi: 'data/kgi-history', main: 'data/main-history', gary: 'data/gary-history', mom: 'data/mom-history' };
         const HISTORY_DIR = (ACCT && HISTORY_DIRS[ACCT.id]) || null;
         const HISTORY_UNTIL = '2026-10-28';   // 這一週起網站自己有完整紀錄
         const withHistory = (history, own) => {
             if (!history) return own;
-            const has = new Set(own.map(s => `${s.week}#${s.slot}`));
-            return [...history.filter(s => !has.has(`${s.week}#${s.slot}`)), ...own].sort((a, b) => a.week < b.week ? -1 : a.week > b.week ? 1 : a.slot - b.slot);
+            const key = s => `${s.week}#${s.slot}`;
+            const has = new Set(own.map(key));
+            const fixed = new Set(history.filter(s => s.fix).map(key));   // 網站存檔把出入金算成損益的盤，以補回的為準
+            return [...history.filter(s => s.fix || !has.has(key(s))), ...own.filter(s => !fixed.has(key(s)))].sort((a, b) => a.week < b.week ? -1 : a.week > b.week ? 1 : a.slot - b.slot);
         };
 
         // 走勢圖每一條線都可以自己開關；同一個軸的線共用刻度，只有畫出來的線的軸才顯示
@@ -552,7 +554,8 @@
             // 該帳號本週走勢：存檔 + 試算表裡還留著的快照（同一時間以試算表為準）
             const acc = (() => {
                 const map = new Map();
-                [series[`history:${week}`], series[week]].forEach(s => {
+                const old = series[`history:${week}`];
+                (old && old.fix ? [old] : [old, series[week]]).forEach(s => {
                     if (!s || !s.acc || !s.acc[name]) return;
                     const a = s.acc[name];
                     s.t.forEach((ts, k) => {
@@ -581,9 +584,8 @@
             const off = official && !isCurrent ? official[week] || null : null;
             const offRows = !off ? rows : rows.map(r => {
                 if (!r.state || r.pending) return r;
-                const asset = r.state.total.base + r.state.total.pnl;
                 if (sum.lastRow && r.i === sum.lastRow.i) return { ...r, cum: off.rate, state: { ...r.state, total: { ...r.state.total, pnl: off.pnl } } };
-                return { ...r, cum: r.i >= off.from ? (asset - off.base) / off.base * 100 : null };
+                return { ...r, cum: sum.lastRow && r.i >= off.from ? (off.pnl - (sum.lastRow.state.total.pnl - r.state.total.pnl)) / off.base * 100 : null }; // 從週末往回推，週中有出入金也不受影響
             });
             const ptsDef = SERIES_DEFS.find(s => s.key === 'pts');
             const trades = tradeStats(week, acc.filter(p => !hidden(ptsDef, p.t)), (demoWeek && demoWeek.series) || []);
@@ -599,7 +601,7 @@
                     return { ...p, spnl, srate: p.base ? +(spnl / p.base * 100).toFixed(4) : null };
                 });
             })();
-            const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week)])].sort().reverse();
+            const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week), ...Object.keys(official || {})])].sort().reverse();
 
             const autoSel = sum.lastRow ? sum.lastRow.i : (rows.find(r => r.live) || {}).i || 0;
             const cur = sel === null ? autoSel : sel;
@@ -714,7 +716,7 @@
                     <div id="page-session" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                         <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                             <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`}</span></h2>
-                            <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, off ? { ...sum, cum: off.rate } : sum)}${off && !off.same && sum.cum !== null ? `（官方；推算 ${sgnPct(sum.cum)}）` : ''}</span>
+                            <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${off && !sum.lastRow ? `${mdLabel(rows[0].date)} ~ ${mdLabel(rows[9].date)} · 只有週績效 · 累積 ${sgnPct(off.rate)}（官方）` : weekSummary(rows, off ? { ...sum, cum: off.rate } : sum)}${off && !off.same && sum.cum !== null ? `（官方；推算 ${sgnPct(sum.cum)}）` : ''}</span>
                             <label className="ml-auto flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-slate-400">歷史週次
                                 <select value=${viewWeek} onChange=${e => { setViewWeek(e.target.value); setSel(null); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs font-bold text-white cursor-pointer">
                                     ${weeks.map(w => html`<option key=${w} value=${w === currentWeek ? '' : w}>${w === currentWeek ? '本週（即時）' : `${mdLabel(w)} 週`}</option>`)}
@@ -723,7 +725,7 @@
                         </div>
                         <div id="win-strip"><${WinStrip} rows=${rows} selected=${cur} onPick=${pick} /></div>
                         <${SessionTable} rows=${offRows} showPersonal=${false} trades=${trades} selected=${cur} onPick=${pick} />
-                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；週三、週五時價取自試算表與下單紀錄，缺的盤顯示「—」；VIX 取自期交所，目前有 2～4 月與 7 月起的資料；百點震幅是用紀錄裡的期指算的。' + (ACCT.id === 'mtk' ? '每盤獲利以下單紀錄為準，週三夜盤的出入金不算損益。' + (!off ? '這一週試算表「歷史紀錄」沒有資料，週累積以推算為準。' : off.same ? '週累積以試算表「歷史紀錄」為準，和推算相同。' : `週累積以試算表「歷史紀錄」為準（官方 ${sgnInt(off.pnl)}${off.start ? `，從 ${off.start} 起算，更早的盤不計入` : ''}）；推算從週首資產起算 ${sum.lastRow ? sgnInt(sum.lastRow.state.total.pnl) : '—'}（${sum.cum !== null ? sgnPct(sum.cum) : '—'}）。`) : '') : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
+                        <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">點任一盤可切換圖表。獲利率 = 該盤獲利 ÷ 本帳號起始資產；紅 = 賺、綠 = 賠。${HISTORY_DIR && week < HISTORY_UNTIL ? '這一週由下單程式的紀錄補回，每 2 分鐘一筆；週三、週五時價取自試算表與下單紀錄，缺的盤顯示「—」；VIX 取自期交所，目前有 2～4 月與 7 月起的資料；百點震幅是用紀錄裡的期指算的。' + (ACCT.id !== 'demo' ? (off && !sum.lastRow ? '這一週只有試算表「歷史紀錄」的週績效，沒有每盤資料。' : '每盤獲利以下單紀錄為準，出入金不算損益' + (['kgi', 'main', 'gary'].includes(ACCT.id) ? '；有些盤沒有每 2 分鐘紀錄，改用成交單上的帳戶總值，數字是估計、盤內走勢較稀疏。' : '。') + (!off ? '這一週試算表「歷史紀錄」沒有資料，週累積以推算為準。' : off.same ? '週累積以試算表「歷史紀錄」為準，和推算相同。' : `週累積以試算表「歷史紀錄」為準（官方 ${sgnInt(off.pnl)}${off.start ? `，從 ${off.start} 起算，更早的盤不計入` : ''}）；推算從週首資產起算 ${sum.lastRow ? sgnInt(sum.lastRow.state.total.pnl) : '—'}（${sum.cum !== null ? sgnPct(sum.cum) : '—'}）。`)) : '') : '帳號走勢每 2 分鐘一筆（10/29 前為每 10 分鐘）。'}<span className="sm:hidden">表格可左右滑動。</span></p>
                     </div>
 
                 </div>`;

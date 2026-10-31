@@ -69,7 +69,7 @@
         .hl-btn { cursor: pointer; transition: background .15s; }
         .hl-btn:hover, .hl-btn:active { background: #1e293b; }
         .hl-body { display: flex; align-items: center; gap: 10px; }
-        .hl-spark { position: relative; display: block; flex: none; width: 76px; height: 30px; }
+        .hl-spark { position: relative; display: block; flex: none; width: 84px; height: 46px; }
         .hl-spark svg { display: block; width: 100%; height: 100%; overflow: visible; }
         .hl-spark polyline { fill: none; stroke-width: 2px; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
         .hl-spark i { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; }
@@ -118,7 +118,7 @@
             .hl-pts { font-size: 19px; }
             .hl-pct { font-size: 12px; }
             .hl-body { flex-direction: column; gap: 3px; width: 100%; }
-            .hl-spark { width: 100%; height: 18px; }
+            .hl-spark { width: 100%; height: 30px; }
             .tr-back { padding: 8px; }
             .tr-note { width: 100%; margin: 0; }
             .tr-controls { padding: 8px 10px; }
@@ -169,7 +169,7 @@
         html.m-portrait header .hl-pts { font-size: 58px !important; }
         html.m-portrait header .hl-pct { font-size: 36px !important; }
         html.m-portrait header .hl-body { flex-direction: column; gap: 10px; width: 100%; }
-        html.m-portrait header .hl-spark { width: 100%; height: 46px; }
+        html.m-portrait header .hl-spark { width: 100%; height: 90px; }
         html.m-portrait header .hl-spark polyline { stroke-width: 4px; }
         html.m-portrait header .hl-spark i { width: 12px; height: 12px; margin: -6px 0 0 -6px; }
         html.m-portrait main { padding: 8px !important; }
@@ -223,7 +223,7 @@
             header .hl-pts { font-size: 18px; }
             header .hl-pct { font-size: 12px; }
             header .hl-body { flex-direction: row; gap: 4px; width: auto; }
-            header .hl-spark { width: 40px; height: 16px; }
+            header .hl-spark { width: 56px; height: 34px; }
             header .hl-refresh span:last-child { display: none; }
             header .hl-refresh span:first-child { font-size: 14px; }
 
@@ -284,6 +284,9 @@
             header .px-4.py-3 { display: none !important; }
             header .hl-stats { flex: 1 1 auto; }
             header .hl-stats > * { flex: 1 1 auto !important; justify-content: center; }
+        }
+        @media (orientation: landscape) and (max-height: 600px) and (max-width: 760px) {
+            header .hl-spark { width: 36px; }
         }
         @media (orientation: landscape) and (max-height: 600px) and (max-width: 620px) {
             header .hl-spark { display: none; }
@@ -1008,20 +1011,22 @@
             const week = viewWeek || currentWeek;
             const isCurrent = week === currentWeek;
             const historySessions = history ? history.sessions : [];
-            const isHistory = !isCurrent && historySessions.some(s => s.week === week);
+            const historyOfficial = history ? history.official : {};
+            const isHistory = !isCurrent && (historySessions.some(s => s.week === week) || !!historyOfficial[week]);
             const rows = buildWeek(week, isHistory ? historySessions : sessions, isCurrent ? live : null, isCurrent ? liveMarket : {}, isCurrent ? liveVix : null);
-            const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week), ...historySessions.map(s => s.week)])].sort().reverse();
+            const weeks = [...new Set([currentWeek, ...sessions.map(s => s.week), ...historySessions.map(s => s.week), ...Object.keys(historyOfficial)])].sort().reverse();
             const sum = summarize(rows);
             // 週累積以官方為主（目前只有聯發哥 7/1 週以前跟每盤加總不同）：累積欄只留最後一格，其他顯示「—」
-            const off = isHistory && history.official[week] || null;
+            const off = isHistory && historyOfficial[week] || null;
             const tableRows = !off ? rows : rows.map(r => {
                 if (!r.state || r.pending) return r;
                 if (sum.lastRow && r.i === sum.lastRow.i) return { ...r, cum: off.rate, state: { ...r.state, total: { ...r.state.total, pnl: off.total, personal: off.personal } } };
                 return { ...r, cum: null };
             });
-            const historyNote = isHistory ? `這一週只補齊${history.accounts.join('、')}，合計與個人獲利只含這些帳號。${off ? '週累積以試算表「歷史紀錄」為主（聯發哥從週五起算），每盤獲利加總是推算值。' : ''}` : '';
+            const historyNote = isHistory ? `這一週只有已補齊資料的帳號，合計與個人獲利只含這些帳號${off && off.weeklyOnly.length ? `（${off.weeklyOnly.join('、')}只有週績效，沒有每盤資料）` : ''}。${off ? '週累積以試算表「歷史紀錄」為主，每盤獲利加總是推算值。' : ''}` : '';
             const accounts = [];
             sum.opened.forEach(r => r.state.accounts.forEach(a => { if (!accounts.includes(a.name)) accounts.push(a.name); }));
+            if (off) Object.keys(off.acc).forEach(n => { if (!accounts.includes(n)) accounts.push(n); });
             const weekTag = isCurrent ? '（本週）' : `（${mdLabel(week)} 週）`;
 
             const weekPicker = html`
@@ -1037,7 +1042,7 @@
                         <div id="page-session" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                             <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                                 <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">每盤績效表<span className="text-white">${weekTag}</span></h2>
-                                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${weekSummary(rows, off ? { ...sum, cum: off.rate } : sum)}${off && sum.cum !== null ? `（官方；推算 ${sgnPct(sum.cum)}）` : ''}</span>
+                                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">${off && !sum.lastRow ? `${mdLabel(rows[0].date)} ~ ${mdLabel(rows[9].date)} · 只有週績效 · 累積 ${sgnPct(off.rate)}` : weekSummary(rows, off ? { ...sum, cum: off.rate } : sum)}${off && sum.cum !== null ? `（官方；推算 ${sgnPct(sum.cum)}）` : ''}</span>
                                 ${weekPicker}
                             </div>
                             <div id="win-strip"><${WinStrip} rows=${rows} /></div>
@@ -1050,7 +1055,7 @@
                             <div id="page-accounts" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
                                 <div className="bg-slate-900 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                                     <h2 className="text-yellow-400 font-black text-sm sm:text-base tracking-tight">各帳號每盤損益<span className="text-white">${weekTag}</span></h2>
-                                    <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">點帳號名稱看該帳號的獨立績效頁${isHistory ? `；這一週只有${history.accounts.join('、')}` : ''}</span>
+                                    <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">點帳號名稱看該帳號的獨立績效頁${isHistory ? `；這一週只有已補齊資料的帳號` : ''}</span>
                                     ${weekPicker}
                                 </div>
                                 <div className="overflow-x-auto">

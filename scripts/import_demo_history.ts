@@ -1,5 +1,5 @@
 // 示範帳號歷史：下單程式 conf 裡的合約紀錄（台選*.csv，每 2 分鐘一筆）→ 網站的每週存檔
-// 在 repo 根目錄執行：deno run --allow-read --allow-write --allow-net scripts/import_demo_history.ts <合約紀錄資料夾> <輸出資料夾，例 data/demo-history> [demo|mtk]（輸出資料夾給空字串 = 只驗算）
+// 用法：deno run --allow-read --allow-write --allow-net gen.ts <合約紀錄資料夾> <輸出資料夾，例 data/demo-history> [demo|mtk]（輸出資料夾給空字串 = 只驗算）
 // 網站本身的存檔（data/sessions.json、data/series）從 2026-10-28 才有，這裡補更早的；同一盤以網站存檔為準
 // 週三、週五時價：示範帳戶試算表「資料暫存區」每週一欄（欄名沒有日期，下方 BA_COLS / BB_COLS 是用合約紀錄比對出來的）；
 //                 沒有的週用合約紀錄的時間價值，但紀錄只有當時交易的那一檔（週三夜盤~週五早盤是週五選、週五夜盤~下週三是週三選）
@@ -13,7 +13,21 @@ const LAST_WEEK = '2026-10-21';      // 10-28 週起網站自己有完整紀錄
 //      5/20 08:45~17:28 帳戶總值讀到 1,000 萬上下（前後都是 2,000 萬以上），是壞資料，不用
 const ACCOUNTS: Record<string, any> = {
   demo: { name: '示範帳號', fixedBase: 1000000, min: 300000, max: 3e6, drop: [] },
-  mtk:  { name: '聯發哥', fixedBase: null, min: 5e6, max: 1e8, drop: [['2026-05-20T05:00:00Z', '2026-05-20T17:28:59Z']] }
+  mtk:  { name: '聯發哥', fixedBase: null, min: 5e6, max: 1e8, drop: [['2026-05-20T05:00:00Z', '2026-05-20T17:28:59Z']] },
+  // 以下帳號資料不完整：kgi 是另一套程式（帳務資訊 + 下單理由回報）；main、gary 只有 8/12 週起的合約紀錄；mom 沒有帳戶總值，只有官方週績效
+  // flows = 出入金 [出入金之後第一筆的時間, 金額]，不算損益；金額跟存提款欄、官方起始資產的差額核對過
+  // kgi：成交單上的總市值持倉時比帳務資訊高 2~3%，只有空手時一致 → 成交單只用空手的；drop 是程式短暫連到別的帳戶（100 萬、300 萬、1,000 萬）
+  kgi:  { name: '歐大_凱基', fixedBase: null, min: 2e5, max: 5e7, format: 'kgi', from: '2026-03-11', flatOrdersOnly: true,
+          drop: [['2026-07-07T00:03:00Z', '2026-07-07T00:31:00Z'], ['2026-07-18T09:46:00Z', '2026-07-20T08:42:00Z'], ['2026-10-13T16:07:00Z', '2026-10-13T17:05:00Z']],
+          flows: [['2026-05-04T11:29:00Z', -3800000], ['2026-05-04T11:41:00Z', -1700000], ['2026-05-04T15:03:00Z', -900000], ['2026-05-05T18:50:00Z', 1400000], ['2026-05-06T00:48:00Z', 1400000], ['2026-05-07T00:12:00Z', 1500000], ['2026-05-08T08:55:00Z', 1500000], ['2026-05-14T20:40:00Z', 1400000]],
+          officialStart: { '2026-04-29': { from: 8, start: '5/06 00:48' } } },   // 試算表這週的起始資產是這筆入金之後的，更早的盤不算進官方累積
+  // main 10/27：出入金金額沒有其他資料可對，用前後兩筆的資產差（gary 同時段幾乎沒動，差額可視為全是出入金）。
+  // 試算表 10/21 週的起始資產沒有扣掉這兩筆的淨額，officialAdj 把它加回官方損益；fixWeeks 這週用這裡算的盤，不用網站存檔（網站存檔也沒扣）
+  main: { name: '大帳號', fixedBase: null, min: 3e6, max: 5e7, drop: [], orders: true, from: '2026-08-12',
+          flows: [['2026-09-11T15:49:00Z', -2800000], ['2026-09-18T08:48:00Z', 2600000], ['2026-10-27T08:48:00Z', -5593807], ['2026-10-27T20:14:00Z', 5362652]],
+          officialAdj: { '2026-10-21': 5593807 - 5362652 }, fixWeeks: ['2026-10-21'] },
+  gary: { name: 'gary-lan', fixedBase: null, min: 3e6, max: 5e7, drop: [], orders: true, from: '2026-08-12', flows: [['2026-08-14T16:06:00Z', -1000000], ['2026-10-08T15:00:00Z', -1000000]] },
+  mom:  { name: '媽媽帳號', fixedBase: null, min: 5e5, max: 2e7, drop: [] }
 };
 const CFG = ACCOUNTS[ACCOUNT];
 if (!CFG) throw new Error('不認識的帳號：' + ACCOUNT);
@@ -125,9 +139,32 @@ for (const name of names.sort()) {
     raw.push({ f: name, kind: name.startsWith('台選週五') ? 'F' : 'W', t, pts: num(c[7]), ratio: num(c[8]), tv: num(c[9]), asset: num(c[q]), fut: num(c[q + 1]), margin: num(c[q + 2]), fee: num(c[q + 3]), delta: num(c[q + 6]) });
   }
 }
+// 沒有每 2 分鐘紀錄的盤，用成交單上的帳戶總值：每 2 分鐘留最後一筆（單子很密，全留檔案太大）
+const decode = (b: Uint8Array) => { const u = new TextDecoder().decode(b); return u.includes('\uFFFD') ? new TextDecoder('big5').decode(b) : u; };
+const minuteOf = (d: string, tm: string) => { const m = tm.match(/(\d{1,2}):(\d{2})/); return m ? Date.parse(`${d.replace(/'/g, '').replaceAll('/', '-')}T${m[1].padStart(2, '0')}:${m[2]}:00Z`) : NaN; };
+const orderRows = new Map<number, any>();
+const addOrder = (t: number, r: any) => { if (isFinite(t)) orderRows.set(t - t % 120000, { ...r, t: t - t % 120000, src: 'order' }); };
+const sourceFiles = [...Deno.readDirSync(SRC)].map(e => e.name).sort();
+if (CFG.format === 'kgi') {
+  for (const name of sourceFiles.filter(n => n.startsWith('帳務資訊'))) for (const l of decode(Deno.readFileSync(`${SRC}/${name}`)).replace(/^\uFEFF/, '').split(/\r?\n/).slice(1)) {
+    const c = l.split(','); if (!/^\d{4}\//.test(c[0] || '')) continue;
+    raw.push({ f: name, kind: 'W', t: minuteOf(c[0], c[1]), pts: num(c[5]), ratio: num(c[6]), tv: num(c[10]), asset: num(c[11]), fut: num(c[13]), margin: num(c[12]), fee: num(c[14]), delta: num(c[9]) });
+  }
+  for (const name of sourceFiles.filter(n => n.startsWith('下單理由'))) for (const l of decode(Deno.readFileSync(`${SRC}/${name}`)).replace(/^\uFEFF/, '').split(/\r?\n/).slice(1)) {
+    const c = l.split(','); if (!/^\d{4}\//.test(c[0] || '')) continue;
+    addOrder(minuteOf(c[0], c[1]), { f: name, kind: /_TX[UVXYZ]-/.test(name) ? 'F' : 'W', pts: null, ratio: null, tv: null, asset: num(c[6]), fut: num(c[9]), margin: num(c[7]), fee: num(c[8]), delta: null });
+  }
+}
+if (CFG.orders) for (const name of sourceFiles.filter(n => /^OrderRecord(台選|tx).*2026\.csv$/.test(n))) for (const l of decode(Deno.readFileSync(`${SRC}/${name}`)).replace(/^\uFEFF/, '').split(/\r?\n/).slice(1)) {
+  const c = l.split(','); if (!/^\d{4}\//.test(c[0] || '')) continue;
+  addOrder(minuteOf(c[0], c[1]), { f: name, kind: name.includes('週五') ? 'F' : 'W', pts: null, ratio: null, tv: null, asset: num(c[6]), fut: null, margin: num(c[7]), fee: num(c[8]), delta: null });
+}
+raw.push(...orderRows.values());
 // 帳戶總值 0 / 期指 0 是剛啟動還沒讀到；其餘範圍外的是錯位或亂碼，都不要
 const dropped = CFG.drop.map(([a, b]: string[]) => [Date.parse(a), Date.parse(b)]);
-const inRange = raw.filter(r => r.asset && r.asset > CFG.min && r.asset < CFG.max && r.fut && r.fut > 10000 && r.fut < 200000 && !dropped.some(([a, b]: number[]) => r.t >= a && r.t <= b));
+const fromT = CFG.from ? Date.parse(CFG.from + 'T00:00:00Z') : -Infinity;
+const inRange = raw.filter(r => isFinite(r.t) && r.t >= fromT && !(CFG.flatOrdersOnly && r.src === 'order' && !(r.margin >= r.asset * .995)) && r.asset && r.asset > CFG.min && r.asset < CFG.max && (r.src === 'order' || (r.fut && r.fut > 10000 && r.fut < 200000)) && !dropped.some(([a, b]: number[]) => r.t >= a && r.t <= b));
+inRange.forEach(r => { if (r.fut !== null && !(r.fut > 10000 && r.fut < 200000)) r.fut = null; });
 console.log(`讀入 ${raw.length} 列（壞列 ${badRows}），可用 ${inRange.length}`);
 
 // ---- 依週、依盤分組；同一盤兩個檔同時在記（換約前後程式重開）：重疊的時段只留筆數多的檔
@@ -172,17 +209,30 @@ for (const week of [...weeks.keys()].sort()) {
   const slot0 = (slotMap.get(0) || []).slice().sort((a, b) => a.t - b.t);
   for (let i = 1; i < slot0.length; i++) if (!slot0[i].pts && !slot0[i - 1].pts && Math.abs(slot0[i].asset - slot0[i - 1].asset) >= FLOW_MIN) { flowAt = slot0[i].t; flows.push(`${new Date(slot0[i].t).toISOString().slice(5, 16).replace('T', ' ')} ${Math.round(slot0[i].asset - slot0[i - 1].asset)}`); }
   weekAll.set(week, allRows);
+  const midFlows: { t: number; d: number }[] = [];
+  if (!CFG.fixedBase && !CFG.flows) {
+    const logRows = allRows.filter(r => r.src !== 'order' && r.t >= flowAt);
+    for (let i = 1; i < logRows.length; i++) { const a = logRows[i - 1], b = logRows[i]; if (b.t > flowAt && b.s.slot > 0 && a.pts === 0 && b.pts === 0 && Math.abs(b.asset - a.asset) >= FLOW_MIN) { midFlows.push({ t: b.t, d: b.asset - a.asset }); flows.push(`${new Date(b.t).toISOString().slice(5, 16).replace('T', ' ')} ${Math.round(b.asset - a.asset)}（週中）`); } }
+  }
+  for (const [at, d] of CFG.flows || []) {
+    const t = Date.parse(at);
+    if (slotOf(t)?.week === week) { midFlows.push({ t, d }); flows.push(`${at.slice(5, 16).replace('T', ' ')} ${d}`); }
+  }
+  const adjOf = (t: number) => midFlows.filter(f => f.t <= t).reduce((x, f) => x + f.d, 0);
   const startRow = allRows.find(r => r.t >= flowAt)!;
   const hasReset = CFG.fixedBase ? allRows.some(r => r.asset === CFG.fixedBase) : true;
-  const base = CFG.fixedBase ?? siteOfWeek?.accounts.find((a: any) => a.name === NAME).base ?? startRow.asset;
+  const base = CFG.fixedBase ?? siteOfWeek?.accounts.find((a: any) => a.name === NAME).base ?? startRow.asset - adjOf(startRow.t);
   const kept: any[] = [];
   for (let slot = 0; slot < 10; slot++) {
     const rows0 = slotMap.get(slot);
     if (!rows0) continue;
-    const rows = resolveOverlap(rows0).sort((a, b) => a.t - b.t);
+    // 有每 2 分鐘紀錄就用紀錄（收盤前最後一段補上成交單）；沒有就用成交單
+    const logs0 = resolveOverlap(rows0.filter(r => r.src !== 'order')), orders0 = rows0.filter(r => r.src === 'order');
+    const lastLog = logs0.length >= 20 ? Math.max(...logs0.map(r => r.t)) : -Infinity;
+    const rows = [...logs0, ...orders0.filter(r => r.t > lastLog + 180000)].sort((a, b) => a.t - b.t);
     // 期指幾乎不動 = 休市（連假程式還開著），這一盤不算
-    const distinct = new Set(rows.map(r => r.fut)).size;
-    if (distinct < 5) { closedSlots.push(`${week}#${slot}(${rows.length}筆/${distinct})`); continue; }
+    const distinct = new Set(logs0.map(r => r.fut)).size;
+    if (!orders0.length && distinct < 5) { closedSlots.push(`${week}#${slot}(${rows.length}筆/${distinct})`); continue; }
     const seen = new Set<number>();
     const uniq = rows.filter(r => { if (seen.has(r.t)) return false; seen.add(r.t); return true; });
     // 週三、週五時價：試算表優先；沒有的用合約紀錄（報價卡住的時段不算，再用中位數濾掉跳點）
@@ -214,12 +264,12 @@ for (const week of [...weeks.keys()].sort()) {
     weekSessions.push({
       id: `${date}${SLOTS[slot][1]}`, week, slot, date, type: SLOTS[slot][1],
       at: new Date(last.t).toISOString().slice(0, 19).replace('T', ' '), fut: last.fut,
-      total: { pnl: Math.round(last.asset - base), personal: null, base, resetBase: week },
-      accounts: [{ name: NAME, pnl: Math.round(last.asset - base), base }],
-      open: { at: new Date(first.t).toISOString().slice(0, 19).replace('T', ' '), total: Math.round(first.asset - base), accounts: { [NAME]: Math.round(first.asset - base) } },
+      total: { pnl: Math.round(last.asset - adjOf(last.t) - base), personal: null, base, resetBase: week },
+      accounts: [{ name: NAME, pnl: Math.round(last.asset - adjOf(last.t) - base), base }],
+      open: { at: new Date(first.t).toISOString().slice(0, 19).replace('T', ' '), total: Math.round(first.asset - adjOf(first.t) - base), accounts: { [NAME]: Math.round(first.asset - adjOf(first.t) - base) } },
       market: { swing: swing100(uniq.map(r => r.fut)), ba: lastChg(uniq.map(r => r.ba)), bb: lastChg(uniq.map(r => r.bb)), ...(SLOTS[slot][1] === 'D' && vixDaily.has(date) ? { vix: vixDaily.get(date) } : {}) }
     });
-    uniq.forEach(r => kept.push({ ...r, base, noPnl: r.t < flowAt }));
+    uniq.forEach(r => kept.push({ ...r, base, noPnl: r.t < flowAt, adj: adjOf(r.t) }));
   }
   weekSeries.set(week, kept);
   report.push(`${week} ${hasReset ? '' : '(未重設) '}盤 ${weekSessions.filter(s => s.week === week).map(s => s.slot).join('')} 筆 ${kept.length}`);
@@ -227,8 +277,9 @@ for (const week of [...weeks.keys()].sort()) {
 console.log(report.join('\n'));
 console.log('視為休市的盤：', closedSlots.join(' '));
 
-const lastPnl = (w: string) => { const own = siteEarly.filter((s: any) => s.week === w && s.accounts.some((a: any) => a.name === NAME)).sort((a: any, b: any) => a.slot - b.slot).at(-1); const s = weekSessions.filter(x => x.week === w).sort((a, b) => a.slot - b.slot).at(-1); const x = own && (!s || own.slot >= s.slot) ? own : s; if (!x) return null; const a = x.accounts.find((y: any) => y.name === NAME); return a.pnl / a.base * 100; };
-console.log('週三夜盤的出入金', flows.join('；') || '無');
+const lastPnl = (w: string) => { const own = (CFG.fixWeeks || []).includes(w) ? null : siteEarly.filter((s: any) => s.week === w && s.accounts.some((a: any) => a.name === NAME)).sort((a: any, b: any) => a.slot - b.slot).at(-1); const s = weekSessions.filter(x => x.week === w).sort((a, b) => a.slot - b.slot).at(-1); const x = own && (!s || own.slot >= s.slot) ? own : s; if (!x) return null; const a = x.accounts.find((y: any) => y.name === NAME); return a.pnl / a.base * 100; };
+console.log('出入金', flows.join('；') || '無');
+{ let pw = '', pv = 0; const big: string[] = []; for (const s of weekSessions) { const a = s.accounts[0]; if (s.week !== pw) { pw = s.week; pv = 0; } const d = a.pnl - pv; pv = a.pnl; if (Math.abs(d) / a.base >= .035) big.push(`${s.id} ${d}（${(d / a.base * 100).toFixed(1)}%）`); } console.log('單盤跳動 ≥3.5%：', big.join('；') || '無'); }
 console.log('時價來源（筆）', JSON.stringify(srcCount));
 const weekCover = [...new Set(weekSessions.map(s => s.week))].map(w => { const ss = weekSessions.filter(s => s.week === w); return `${w.slice(5)} BA${ss.filter(s => s.market.ba).length}/BB${ss.filter(s => s.market.bb).length}/V${ss.filter(s => s.market.vix).length}/盤${ss.length}`; });
 console.log(weekCover.join('  '));
@@ -248,7 +299,7 @@ console.log(`符合 ${okCnt}/${site.length}`);
 
 const siteSer = JSON.parse(await Deno.readTextFile(`${SITE}/series/2026-10-28.json`));
 const A = siteSer.acc[NAME];
-const mineW = new Map((weekSeries.get('2026-10-28') || []).map((r: any) => [r.t, r]));
+const mineW = new Map((weekSeries.get('2026-10-28') || []).filter((r: any) => r.src !== 'order').map((r: any) => [r.t, r]));
 const cmp: any = { asset: [], pts: [], fut: [], tv: [], ratio: [], margin: [], delta: [] };
 siteSer.t.forEach((ts: string, i: number) => {
   const t0 = Date.parse(ts.slice(0, 16).replace(' ', 'T') + ':00Z');
@@ -273,19 +324,19 @@ for (const week of [...new Set(weekSessions.map(s => s.week))]) {
 // ---- 官方週績效：投資報表試算表「歷史紀錄」分頁（每週三 13:44 的快照）。7/1 週以前的起始資產多半是週五 15:00 的資產，
 //      from = 官方從第幾盤起算（比這更早的盤不算進官方累積），用「起始資產在當週紀錄裡第一次出現的時間」找
 const official: Record<string, any> = {};
-if (ACCOUNT === 'mtk') {
+if (!CFG.fixedBase) {
   const R = parseCSV(await (await fetch('https://docs.google.com/spreadsheets/d/1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk/export?format=csv&gid=173635889')).text());
   let cur: string | null = null;
   for (const r of R) {
     const st = r.slice(0, 6).find(x => /^\d{4}\/\d{1,2}\/\d{1,2} \d{1,2}:\d{2}/.test((x || '').trim()));
     if (st) cur = st.trim();
-    if (!/[聯連]發哥/.test(r[2] || '') || !cur) continue;
+    if ((r[2] || '').trim().replace(/\((主|副)\)$/, '').replace(/^連發哥$/, '聯發哥') !== NAME || !cur) continue;
     const m = cur.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/)!;
     const week = addDays(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`, -7);
     const asset = num(r[12]), pnlCell = num(r[7]);
     if (asset === null || num(r[13]) === null || week < FROM_WEEK) continue;
     const base = pnlCell !== null ? asset - pnlCell : num(r[13])!;   // 有幾週的起始資產格被蓋掉，但獲利金額還在
-    const pnl = asset - base, rate = +(pnl / base * 100).toFixed(2);
+    const pnl = asset - base + (CFG.officialAdj?.[week] || 0), rate = +(pnl / base * 100).toFixed(2);
     const rows = weekAll.get(week) || [];
     const hit = rows.reduce((b: any, x: any) => Math.abs(x.asset - base) < Math.abs((b?.asset ?? 1e15) - base) ? x : b, null);
     const near = hit && Math.abs(hit.asset - base) <= 300;
@@ -294,15 +345,17 @@ if (ACCOUNT === 'mtk') {
     const mine = lastPnl(week);
     const same = mine !== null && Math.abs(mine - rate) < .02;   // 跟推算相同就不用標起算時間
     official[week] = { base, asset, pnl, rate, from: late && !same ? first.s.slot : 0,
-      start: late && !same ? new Date(first.t).toISOString().slice(5, 16).replace('T', ' ').replace(/^0/, '').replace('-', '/') : null, same };
+      start: late && !same ? new Date(first.t).toISOString().slice(5, 16).replace('T', ' ').replace(/^0/, '').replace('-', '/') : null, same, ...(CFG.officialStart?.[week] || {}) };
   }
   console.log(`官方週績效 ${Object.keys(official).length} 週，和推算相同 ${Object.values(official).filter((o: any) => o.same).length} 週`);
 }
 
 if (OUT) {
   await Deno.mkdir(OUT, { recursive: true });
-  const sessions = weekSessions.filter(s => s.week <= LAST_WEEK && !site.some((x: any) => x.week === s.week && x.slot === s.slot));
-  await Deno.writeTextFile(`${OUT}/sessions.json`, JSON.stringify({ source: 'conf 合約紀錄（台選*.csv）', sessions, ...(ACCOUNT === 'mtk' ? { official } : {}) }) + '\n');
+  const fixed = (s: any) => (CFG.fixWeeks || []).includes(s.week);
+  const onSite = (s: any) => site.some((x: any) => x.week === s.week && x.slot === s.slot);
+  const sessions = weekSessions.filter(s => s.week <= LAST_WEEK && (fixed(s) || !onSite(s))).map(s => fixed(s) && onSite(s) ? { ...s, fix: true } : s);   // fix = 蓋過網站存檔的同一盤
+  await Deno.writeTextFile(`${OUT}/sessions.json`, JSON.stringify({ source: '下單程式的紀錄', name: NAME, sessions, ...(CFG.fixedBase ? {} : { official }) }) + '\n');
   // 走勢：網站存檔已有的時段不重複（10-21 週的最後一盤）
   const siteFirst = new Map<string, number>();
   for await (const e of Deno.readDir(`${SITE}/series`)) {
@@ -312,16 +365,17 @@ if (OUT) {
   let total = 0, files = 0;
   for (const [week, rows] of weekSeries) {
     if (week > LAST_WEEK || !rows.length) continue;
-    const cut = siteFirst.get(week) ?? Infinity;
+    const fix = (CFG.fixWeeks || []).includes(week);
+    const cut = fix ? Infinity : siteFirst.get(week) ?? Infinity;
     const use = rows.filter((r: any) => r.t < cut);
-    const pnl = (r: any) => r.noPnl ? null : Math.round(r.asset - r.base);
+    const pnl = (r: any) => r.noPnl ? null : Math.round(r.asset - (r.adj || 0) - r.base);
     const data = {
-      week, t: use.map((r: any) => new Date(r.t).toISOString().slice(0, 19).replace('T', ' ')), fut: use.map((r: any) => +r.fut.toFixed(1)),
+      ...(fix ? { fix } : {}), week, t: use.map((r: any) => new Date(r.t).toISOString().slice(0, 19).replace('T', ' ')), fut: use.map((r: any) => r.fut === null ? null : +r.fut.toFixed(1)),
       ba: use.map((r: any) => r.ba === null ? null : Math.round(r.ba)), bb: use.map((r: any) => r.bb === null ? null : Math.round(r.bb)),
       acc: { [NAME]: {
         pnl: use.map(pnl), rate: use.map((r: any) => r.noPnl ? null : +(pnl(r)! / r.base * 100).toFixed(2)), base: use.map((r: any) => r.base), asset: use.map((r: any) => Math.round(r.asset)),
-        pts: use.map((r: any) => Math.round(r.pts ?? 0)), tv: use.map((r: any) => r.tv === null ? null : Math.round(r.tv)), ratio: use.map((r: any) => r.ratio),
-        delta: use.map((r: any) => r.delta), margin: use.map((r: any) => r.margin === null ? null : Math.round(r.margin / r.asset * 100))
+        pts: use.map((r: any) => r.pts === null ? null : Math.round(r.pts)), tv: use.map((r: any) => r.tv === null ? null : Math.round(r.tv)), ratio: use.map((r: any) => r.ratio),
+        delta: use.map((r: any) => r.delta), margin: use.map((r: any) => r.margin === null ? null : Math.min(100, Math.round(r.margin / r.asset * 100)))
       } }
     };
     const txt = JSON.stringify(data) + '\n';
