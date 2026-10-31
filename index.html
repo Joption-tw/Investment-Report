@@ -46,6 +46,7 @@
         .font-mono-data { font-family: Arial, sans-serif; }
         table { border-collapse: separate; border-spacing: 0; }
         th, td { border: 1px solid #e2e8f0 !important; }
+        #total-row td { border-color: #334155 !important; }
         * { -webkit-tap-highlight-color: transparent; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -70,6 +71,8 @@
         html.m-portrait #app-root th { padding: 6px 2px !important; font-size: 14px !important; line-height: 1.15 !important; letter-spacing: 0 !important; white-space: normal !important; }
         html.m-portrait #app-root td { padding: 7px 3px !important; font-size: 15px !important; line-height: 1.2 !important; white-space: nowrap !important; }
         html.m-portrait #page-session td div + div { font-size: 12px !important; line-height: 1.1 !important; }
+        html.m-portrait #app-root #total-row td { font-size: 18px !important; }
+        html.m-portrait #total-row .total-label { font-size: 13px !important; }
         html.m-portrait #session-panel h2 { font-size: 22px !important; }
         html.m-portrait #session-panel h2 ~ span, html.m-portrait #session-panel label, html.m-portrait #session-panel select { font-size: 15px !important; }
         html.m-portrait #page-session > p { font-size: 14px !important; }
@@ -115,6 +118,9 @@
             #app-root table { width: 100% !important; }
             #app-root th { padding: 2px !important; font-size: 9.5px !important; line-height: 1.1 !important; letter-spacing: 0 !important; white-space: normal !important; }
             #app-root td { padding: 3px !important; font-size: var(--fit-font) !important; line-height: 1.15 !important; white-space: nowrap !important; }
+
+            #app-root #total-row td { font-size: calc(var(--fit-font) + 1px) !important; }
+            #total-row .total-label { font-size: 8px !important; margin: 0 !important; }
 
             /* 每頁只顯示一張表：第 1 頁總表、第 2 頁每盤績效表、第 3 頁各帳號每盤損益 */
             #session-panel, #page-session, #page-accounts { display: none; }
@@ -290,10 +296,9 @@
                         // 試算表的「起始資產」在網站上顯示成「初始金額」
                         const filteredHeaders = originalHeaders.filter((_, idx) => idx !== tvIdx && idx !== fiIdx)
                             .map(h => h.trim() === '起始資產' ? '初始金額' : h);
-                        // 帳號名稱不顯示「(主)」；歐大總績效兩列的「總Delta值」欄放的是個人獲利 / 總點數，不是 Delta，留白
-                        const deltaIdx = originalHeaders.findIndex(h => h.includes('總Delta值'));
+                        // 帳號名稱不顯示「(主)」
                         const filteredData = originalData.map(row => row
-                            .map((cell, idx) => idx === 0 ? cleanName(cell) : idx === deltaIdx && String(row[0]).trim().startsWith('歐大總績效') ? '' : cell)
+                            .map((cell, idx) => idx === 0 ? cleanName(cell) : cell)
                             .filter((_, idx) => idx !== tvIdx && idx !== fiIdx));
                         setHeaders(filteredHeaders);
                         setData(filteredData);
@@ -362,12 +367,69 @@
                 return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
             };
 
-            const renderDesktopRows = () => data.map((row, rIdx) => {
+            // 試算表最後兩列（歐大總績效）不是帳號，抽出來合成一條總績效列：個人獲利 + 眾人獲利
+            const isTotalRow = row => String(row[0]).trim().startsWith('歐大總績效');
+            const accountRows = data.filter(row => !isTotalRow(row));
+            const totals = (() => {
+                const row = data.find(r => String(r[0]).trim() === '歐大總績效');
+                const ref = data.find(r => isTotalRow(r) && r !== row);
+                if (!row || pnlIdx === -1) return null;
+                const at = i => (i === -1 ? '' : row[i] || '');
+                const col = name => headers.findIndex(h => h.includes(name));
+                return { row, personal: at(ref ? ref.findIndex(c => c.trim() === '個人獲利') : -1), group: at(pnlIdx), rate: at(rateIdx),
+                         base: at(col('初始金額')), baseIdx: col('初始金額'), pts: at(col('總點數')), sess: sessText(sessOf(row)), sessRaw: sessOf(row) };
+            })();
+            // 深色底上的損益字色：紅 = 賺、綠 = 賠
+            const darkTone = v => { const n = toNum(v); return n > 0 ? 'text-red-400' : n < 0 ? 'text-emerald-400' : 'text-slate-300'; };
+
+            const renderTotalRow = () => {
+                if (!totals || rateIdx === -1 || totals.baseIdx === -1) return null;
+                const tdCls = "px-4 py-2 text-center font-mono-data font-black text-sm whitespace-nowrap ";
+                const labeled = (label, labelCls, v) => html`
+                    <span className=${"total-label block text-[10px] font-black leading-tight mb-0.5 " + labelCls}>${label}</span>
+                    <span className=${darkTone(v)}>${v || '—'}</span>`;
+                const sessTone = !totals.sessRaw || totals.sessRaw.pending ? 'text-slate-400' : darkTone(totals.sessRaw.pnl);
+                return html`
+                    <tr id="total-row" className="bg-slate-900">
+                        <td className=${tdCls + "text-yellow-400"}>歐大總績效</td>
+                        <td colSpan=${pnlIdx - 1} className=${tdCls + "bg-slate-800"}>${labeled('個人獲利', 'text-yellow-400', totals.personal)}</td>
+                        <td className=${tdCls + "bg-slate-800"}>${labeled('眾人獲利', 'text-slate-300', totals.group)}</td>
+                        <td className=${tdCls + darkTone(totals.rate)}>${totals.rate || '—'}</td>
+                        ${sessCol !== -1 && html`<td className=${tdCls + sessTone}>${totals.sess.pnl}</td>`}
+                        ${sessCol !== -1 && html`<td className=${tdCls + sessTone}>${totals.sess.rate}</td>`}
+                        ${totals.baseIdx - rateIdx - 1 > 0 && html`<td colSpan=${totals.baseIdx - rateIdx - 1}></td>`}
+                        <td className=${tdCls + "text-white"}>${totals.base || '—'}</td>
+                        <td className=${tdCls + (isNegative(totals.pts) ? 'text-red-400' : 'text-white')}>${totals.pts || '—'}</td>
+                    </tr>`;
+            };
+
+            const renderTotalCard = () => {
+                if (!totals) return null;
+                const item = (label, v, cls) => html`
+                    <div key=${label} className="flex justify-between items-center gap-2 py-1 px-1.5">
+                        <span className="text-[10px] font-black text-slate-400">${label}</span>
+                        <span className=${"text-sm font-mono-data font-black " + cls}>${v || '—'}</span>
+                    </div>`;
+                return html`
+                    <div className="col-span-full bg-slate-900 rounded-lg overflow-hidden shadow-sm">
+                        <div className="px-3 py-1.5 border-b border-slate-700 text-yellow-400 font-black text-xs">歐大總績效</div>
+                        <div className="p-2 grid grid-cols-2 gap-x-3">
+                            ${item('個人獲利', totals.personal, darkTone(totals.personal))}
+                            ${item('眾人獲利', totals.group, darkTone(totals.group))}
+                            ${item('獲利率', totals.rate, darkTone(totals.rate))}
+                            ${sessCol !== -1 && item('當盤獲利', totals.sess.pnl, totals.sessRaw && !totals.sessRaw.pending ? darkTone(totals.sessRaw.pnl) : 'text-slate-400')}
+                            ${item('初始金額', totals.base, 'text-white')}
+                            ${item('總點數', totals.pts, isNegative(totals.pts) ? 'text-red-400' : 'text-white')}
+                        </div>
+                    </div>`;
+            };
+
+            const renderDesktopRows = () => accountRows.map((row, rIdx) => {
                 const cells = row.flatMap((cell, cIdx) => cIdx === sessCol ? [renderCell(cell, cIdx), ...sessCells(row)] : [renderCell(cell, cIdx)]);
                 return html`<tr key=${rIdx} className="hover:bg-slate-50 transition-colors">${cells}</tr>`;
             });
 
-            const renderMobileCards = () => data.map((row, rIdx) => {
+            const renderMobileCards = () => accountRows.map((row, rIdx) => {
                 const cardRows = headers.slice(1).map((h, i) => {
                     const cell = row[i + 1];
                     const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass } = getCellStyle(h, cell);
@@ -438,11 +500,13 @@
                                     <tbody className="divide-y divide-slate-100">
                                         ${renderDesktopRows()}
                                     </tbody>
+                                    <tfoot>${renderTotalRow()}</tfoot>
                                 </table>
                             </div>
                         </div>
                         <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-2">
                             ${renderMobileCards()}
+                            ${renderTotalCard()}
                             <div className="col-span-full py-10 text-center opacity-20">
                                 <p className="text-[9px] font-black tracking-[0.4em] uppercase">END OF STREAM</p>
                             </div>
