@@ -626,7 +626,7 @@
             return html`
                 <div id="app-root" className="max-w-[1500px] mx-auto space-y-2 sm:space-y-3 p-1.5 sm:p-4">
                     <header className="glass-card px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:grid sm:grid-cols-[1fr_auto_1fr] items-center gap-3">
-                        ${ACCT.home !== false
+                        ${ACCT.home !== false && window.top === window.self /* 被其他網站內嵌時不放回總表的按鈕 */
                             ? html`<a href="./" className="self-start sm:self-center sm:justify-self-start inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-900 text-yellow-400 font-black text-xs hover:bg-slate-800">← 總表</a>`
                             : html`<div className="hidden sm:block"></div>`}
                         <div className="text-center">
