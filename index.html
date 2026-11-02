@@ -65,6 +65,7 @@
         .hl-up .hl-chg { color: #fca5a5; }
         .hl-down { background: rgba(34, 197, 94, .18); }
         .hl-down .hl-chg { color: #4ade80; }
+        .hl-stale { opacity: .45; }
         /* 時間價值、期貨指數：格子本身是按鈕，點了放大走勢圖；數字旁邊是當盤的微型走勢 */
         .hl-btn { cursor: pointer; transition: background .15s; }
         .hl-btn:hover, .hl-btn:active { background: #1e293b; }
@@ -385,10 +386,18 @@
 
         const formatTime = (date) => date.toTimeString().split(' ')[0];
 
-        // ===== 時間價值、期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列（頁首的數字也是這一列）=====
+        // 頁首的期貨指數、漲跌：期交所近月台指期（demo-performance 的 /api/fut 代理）；盤中每 5 秒更新，分頁沒在看就不抓，收盤時每分鐘看一次
+        const FUT_URL = 'https://demo-performance.vercel.app/api/fut';
+        const futMarketOpen = () => {
+            const t = tpeNow(), wd = t.getUTCDay(), m = t.getUTCHours() * 60 + t.getUTCMinutes();
+            if (m <= 300) return wd >= 2 && wd <= 6;              // 夜盤到隔天 05:00：週二～週六清晨
+            return wd >= 1 && wd <= 5 && ((m >= 525 && m <= 825) || m >= 900);
+        };
+
+        // ===== 時間價值、期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列（時間價值的數字也是這一列）=====
         const TREND_METRICS = {
             tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '每 2 分鐘一筆，已濾掉資料跳點，可能和即時數字略有差距' },
-            fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '每 2 分鐘一筆，已濾掉資料跳點，可能和即時數字略有差距' },
+            fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '數字是期交所近月台指期；曲線是下單程式每 2 分鐘的指數，兩者有價差' },
             vix: { label: '波動率',   color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數，只有日盤；夜盤顯示最近一個日盤' }
         };
         const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
@@ -611,7 +620,8 @@
             const [currentTime, setCurrentTime] = useState(new Date());
             const [lastUpdated, setLastUpdated] = useState(null);
             const [countdown, setCountdown]     = useState(10);
-            const [topStats, setTopStats]       = useState({ timeValue: '0.0', futureIndex: '0.0', pointsChange: '0.0', percentChange: '0%' });
+            const [topStats, setTopStats]       = useState({ timeValue: '0.0' });
+            const [fut, setFut]                 = useState(null);
             // 收完的盤 + 最新快照：給上面總表算「當盤獲利」、給下面每盤績效表用
             const [sessions, setSessions]       = useState([]);
             const [live, setLive]               = useState(null);
@@ -628,6 +638,16 @@
                 };
                 load();
                 const timer = setInterval(load, 120000);
+                return () => clearInterval(timer);
+            }, []);
+            useEffect(() => {
+                let tick = 0;
+                const load = () => fetch(FUT_URL).then(r => r.ok ? r.json() : null).then(q => { if (q && q.last) setFut({ ...q, at: Date.now() }); }).catch(() => {});
+                load();
+                const timer = setInterval(() => {
+                    tick++;
+                    if (!document.hidden && (futMarketOpen() || tick % 12 === 0)) load();
+                }, 5000);
                 return () => clearInterval(timer);
             }, []);
             useEffect(() => {
@@ -663,16 +683,12 @@
                     if (!text) throw new Error('無法讀取數據');
                     const rawRows = parseCSV(text);
                     if (rawRows.length >= 2) {
-                        const globalRow       = rawRows[0];
                         const originalHeaders = rawRows[1];
                         const originalData    = rawRows.slice(2);
                         const tvIdx = originalHeaders.findIndex(h => h.includes('時間價值'));
                         const fiIdx = originalHeaders.findIndex(h => h.includes('期貨指數'));
                         setTopStats({
-                            timeValue:     tvIdx !== -1 ? (originalData[0] ? originalData[0][tvIdx] : '0.0') : '0.0',
-                            futureIndex:   fiIdx !== -1 ? (originalData[0] ? originalData[0][fiIdx] : '0.0') : '0.0',
-                            pointsChange:  globalRow[1] || '0',
-                            percentChange: globalRow[2] || '0%'
+                            timeValue:     tvIdx !== -1 ? (originalData[0] ? originalData[0][tvIdx] : '0.0') : '0.0'
                         });
                         // 試算表的「起始資產」在網站上顯示成「初始金額」
                         const filteredHeaders = originalHeaders.filter((_, idx) => idx !== tvIdx && idx !== fiIdx)
@@ -901,8 +917,12 @@
                     </div>`;
             }
 
-            const pointsChangeNum = parseFloat(topStats.pointsChange);
-            const pointsChangeFormatted = pointsChangeNum > 0 ? '+' + topStats.pointsChange : topStats.pointsChange;
+            // 盤中超過 30 秒讀不到新報價：數字變淡，才不會把舊數字當成現在的行情
+            const futStale = fut && futMarketOpen() && !document.hidden && Date.now() - fut.at > 30000 ? ' hl-stale' : '';
+            const futValue = fut ? fut.last.toFixed(0) : '--';
+            const pointsChangeNum = fut ? fut.diff : NaN;
+            const pointsChangeFormatted = !fut ? '--' : (fut.diff > 0 ? '+' : '') + fut.diff.toFixed(0);
+            const percentChange = fut ? `${fut.pct > 0 ? '+' : ''}${fut.pct.toFixed(2)}%` : '--';
             const trendCell = (key, value, valueClass) => html`
                 <button type="button" key=${key} onClick=${() => setTrendKey(key)} title=${`放大${TREND_METRICS[key].label}走勢圖`}
                         className="hl-cell hl-btn flex-1 xl:flex-none flex flex-col items-center justify-center text-center">
@@ -915,12 +935,12 @@
             const vixValue = vixDay.length ? vixDay[vixDay.length - 1].vix.toFixed(2) : '--';
             const statCells = html`
                 ${trendCell('tv', topStats.timeValue, 'hl-tv')}
-                ${trendCell('fut', topStats.futureIndex, 'hl-fut')}
+                ${trendCell('fut', futValue, 'hl-fut' + futStale)}
                 <div className=${"hl-cell hl-chg-cell flex-1 xl:flex-none flex flex-col items-center justify-center text-center " + (pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '')}>
                     <span className="hl-label">漲跌</span>
-                    <div className="hl-chg font-mono-data">
+                    <div className=${"hl-chg font-mono-data" + futStale}>
                         <span className="hl-pts">${pointsChangeFormatted}</span>
-                        <span className="hl-pct">(${topStats.percentChange})</span>
+                        <span className="hl-pct">(${percentChange})</span>
                     </div>
                 </div>
                 ${trendCell('vix', vixValue, 'hl-vix')}`;
@@ -983,7 +1003,7 @@
                     </main>
                     <${SessionPanel} sessions=${sessions} live=${live} />
                     <button type="button" id="trend-btn" onClick=${() => setTrendKey('tv')}>走勢圖</button>
-                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: topStats.timeValue, fut: topStats.futureIndex, vix: vixValue }} onClose=${closeTrend} />`}
+                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: topStats.timeValue, fut: futValue, vix: vixValue }} onClose=${closeTrend} />`}
                 </div>`;
         };
 
