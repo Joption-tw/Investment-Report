@@ -2234,9 +2234,9 @@ $('btnPivot').classList.toggle('on', showPivots);
 const AUTO_SEC = 60;
 let left = AUTO_SEC;
 function tick() {
-  const cd = $('countdown'), paused = eraser;
+  const cd = $('countdown'), paused = !!drag;            // 橡皮擦模式也照常每分鐘載入，只有正在拖曳（擦、移動、縮放）時等放開再載入
   cd.classList.toggle('off', paused);
-  cd.title = eraser ? '橡皮擦模式中暫停自動載入' : '距離下次自動載入';
+  cd.title = paused ? '拖曳中，放開後再載入' : '距離下次自動載入';
   if (!paused && --left <= 0) { left = AUTO_SEC; if (LIVE_BASE) loadHosted(); else reload(true); }
   cd.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
