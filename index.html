@@ -552,7 +552,33 @@
                     else if (newSession || hhmm(prev.t).slice(0, 2) !== hhmm(p.t).slice(0, 2)) labels[line.length] = hhmm(p.t);
                     line.push(p);
                 });
-                const peak = (type, color, position, offset) => ({ type, label: { color, position, offset, fontWeight: 'bold', formatter: p => fmtTrend(p.value, m.d) } });
+                // 相對高低點：走勢反轉超過整段高低差 15% 才算一個轉折（同百點震幅的找法，門檻跟著圖的幅度走）
+                const vals = line.map(p => p[metric]);
+                const ok = v => v !== null && v !== undefined && !isNaN(v);
+                const shown = vals.filter(ok), th = shown.length ? (Math.max(...shown) - Math.min(...shown)) * .15 : 0;
+                const turns = [];
+                let trend = 0, hi = -1, lo = -1;
+                vals.forEach((v, i) => {
+                    if (!ok(v)) return;
+                    if (hi === -1) { hi = lo = i; return; }
+                    if (trend === 0) {
+                        if (v > vals[hi]) hi = i;
+                        if (v < vals[lo]) lo = i;
+                        if (th && vals[hi] - vals[lo] >= th) {
+                            if (hi > lo) { turns.push({ i: lo, hi: false }); trend = 1; } else { turns.push({ i: hi, hi: true }); trend = -1; }
+                        }
+                    } else if (trend === 1) {
+                        if (v > vals[hi]) hi = i;
+                        else if (vals[hi] - v >= th) { turns.push({ i: hi, hi: true }); trend = -1; lo = i; }
+                    } else {
+                        if (v < vals[lo]) lo = i;
+                        else if (v - vals[lo] >= th) { turns.push({ i: lo, hi: false }); trend = 1; hi = i; }
+                    }
+                });
+                if (trend === 1) turns.push({ i: hi, hi: true });
+                if (trend === -1) turns.push({ i: lo, hi: false });
+                const turnPoint = t => ({ coord: [t.i, vals[t.i]], value: vals[t.i], symbolSize: mPortrait ? 12 : 6, itemStyle: { color: t.hi ? '#ef4444' : '#10b981' },
+                    label: { color: t.hi ? '#ef4444' : '#10b981', position: t.hi ? 'top' : 'bottom', offset: [0, t.hi ? -5 : 5], fontWeight: 'bold', formatter: p => fmtTrend(p.value, m.d) } });
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
@@ -574,7 +600,7 @@
                     series: [{ name: m.label, type: 'line', data: line.map(p => p[metric]), connectNulls: false, showSymbol: false,
                         lineStyle: { width: mPortrait ? 4 : 2, color: m.color }, itemStyle: { color: m.color }, emphasis: { disabled: true },
                         markPoint: { symbol: 'circle', symbolSize: 0, label: { show: true, fontSize: mPortrait ? 26 : mLandscape ? 10 : 12 },
-                                     data: [peak('max', '#ef4444', 'top', [0, -5]), peak('min', '#10b981', 'bottom', [0, 5])] } }]
+                                     data: turns.map(turnPoint) } }]
                 }, true);
                 chart.current.resize();
             }, [rows, metric, showSessions, turned]);
