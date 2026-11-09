@@ -37,7 +37,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="common.js?v=20261109a"></script>
+    <script src="common.js?v=20261109b"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -341,7 +341,7 @@
         const VERSION  = "V2.2 優化版";
         const SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
         const GID      = '103299629';
-        const RANGE    = 'C2:O14';
+        const RANGE    = 'C2:O15';   // 多讀一列：帳號增減時「歐大總績效」會上下移，讀到它就截斷
         const CSV_URL  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}&range=${RANGE}`;
 
         // 總表帳號名稱連到該帳號那一台的 Chrome 遠端桌面（連結同試算表績效表 B4:B12；CSV 讀不到超連結，機器換了要改這裡）
@@ -735,7 +735,8 @@
                     const rawRows = parseCSV(text);
                     if (rawRows.length >= 2) {
                         const originalHeaders = rawRows[1];
-                        const originalData    = rawRows.slice(2);
+                        const endIdx          = rawRows.findIndex((r, i) => i >= 2 && String(r[0]).trim() === '歐大總績效');
+                        const originalData    = rawRows.slice(2, endIdx === -1 ? undefined : endIdx + 1);
                         const tvIdx = originalHeaders.findIndex(h => h.includes('時間價值'));
                         const fiIdx = originalHeaders.findIndex(h => h.includes('期貨指數'));
                         setTopStats({

@@ -50,7 +50,7 @@ const IR_SHEET     = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
 const IR_GID       = '103299629';
 const SESSIONS_URL = 'data/sessions.json';
 const SERIES_URL   = w => `data/series/${w}.json`;
-const LIVE_URL     = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/export?format=csv&gid=${IR_GID}&range=C2:P14`;
+const LIVE_URL     = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/export?format=csv&gid=${IR_GID}&range=C2:P15`;   // 帳號列 + 歐大總績效兩列；parseSnapshots 讀到歐大總績效就停
 const SNAPS_URL    = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/export?format=csv&gid=${IR_GID}&range=C1:P2000`;
 const DEMO_URL     = 'https://docs.google.com/spreadsheets/d/1AsY4_MJipaMp_cNLpyeXTpFGnG0FD4vWJu-SDRdvtME/export?format=csv&gid=1823639969';
 const DEMO_HISTORY = w => `https://joption-tw.github.io/sample/history/${w}.csv`;
@@ -66,7 +66,8 @@ const ACCOUNTS = [
     { id: 'masterlink', name: '獨孤求敗_元富' },
     { id: 'richdad',    name: '富爸爸' },
     { id: 'rick',       name: 'Rick', home: false },
-    { id: 'mom',        name: '媽媽帳號' }
+    { id: 'mom',        name: '媽媽帳號' },
+    { id: 'tianxia',    name: '天下一統' }
 ];
 const cleanName  = s => String(s || '').trim().replace(/\((主|副)\)$/, '');
 const accountOf  = raw => { const n = cleanName(raw); return ACCOUNTS.find(a => a.name === n || (a.alias || []).includes(n)) || null; };
