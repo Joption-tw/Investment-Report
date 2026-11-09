@@ -1477,7 +1477,7 @@ $('sinaDays').onclick = e => {
   if (s) setView(s.si, s.ei); else drawSina();
 };
 loadSina();
-if (!LIVE_BASE) setInterval(loadSina, 60000);   // 網站上由同步鈕的倒數觸發（tick）
+// 新浪、即時帳務、CSV 都由同步鈕的倒數（tick → syncNow）每分鐘一起載入
 // 剩餘天數：到正在做的合約到期日還有幾天（日曆天）。上證 50ETF 期權每月第 4 個星期三到期（遇假日交易所會順延，這裡沒算）
 // 到期前 ROLL_DAYS 天內改算下個月的合約（10/26 離 10 月合約到期只剩 2 天，實際已經在做 11 月）
 const ROLL_DAYS = 7;
@@ -2185,11 +2185,12 @@ let lastMod = 0;
 async function reload(auto) {
   auto = auto === true;
   if (!fileHandle) { if (!auto) pickFile(); return; }
+  // 自動載入讀不到本機檔（沒權限、被鎖住）或本機檔超過 3 分鐘沒變（可能是舊的複本），改讀 GitHub 上的 CSV，免得圖停住
   try {
     if (fileHandle.queryPermission && await fileHandle.queryPermission({ mode: 'read' }) !== 'granted' &&
-        (auto || await fileHandle.requestPermission({ mode: 'read' }) !== 'granted')) return;
+        (auto || await fileHandle.requestPermission({ mode: 'read' }) !== 'granted')) { if (auto) ownFile = false; return; }
     const f = await fileHandle.getFile();
-    if (auto && f.lastModified === lastMod) { markLoaded(); return; }
+    if (auto && f.lastModified === lastMod) { if (Date.now() - f.lastModified > 18e4) ownFile = false; markLoaded(); return; }
     lastMod = f.lastModified;
     const keep = keepState();
     ownFile = true;
@@ -2199,6 +2200,7 @@ async function reload(auto) {
     flash(`已重新載入 ${f.name}（${new Date().toLocaleTimeString('zh-TW', { hour12: false })}，共 ${D.rows.length.toLocaleString()} 筆）`);
   } catch (err) {
     console.error(err);
+    if (auto) { ownFile = false; return; }
     flash('重新載入失敗：' + (err.name === 'NotReadableError' || err.name === 'NotAllowedError' ? '檔案正被其他程式鎖住或沒有讀取權限，請稍後再試' : err.message), true);
   }
 }
@@ -2228,7 +2230,7 @@ function flash(text, bad) {
 $('btnOpen').onclick = $('drop').onclick = pickFile;
 // 同步數據：網站上重新抓 live 分支的資料；自己電腦開照舊重讀檔案
 // 自己電腦開：按同步不跳「允許讀取檔案」視窗——已經允許過就讀本機 CSV，沒有就讀 GitHub 上的 CSV（慢 1~2 分鐘）
-const syncNow = () => { if (LIVE_BASE) { loadHosted(); return; } reload(true); loadSina(); };
+const syncNow = () => { if (LIVE_BASE) { loadHosted(); return; } reload(true).then(loadSina); };   // 先試本機檔，讀不到再由 loadHosted 讀 GitHub
 $('btnReload').onclick = syncNow;
 if (!LIVE_BASE) $('btnHome').href = 'https://joption-tw.github.io/Investment-Report/';   // 自己電腦開時，回總表要連到網站
 const SHORT_URL = LIVE_BASE ? location.host + location.pathname : SITE_URL;
@@ -2255,7 +2257,7 @@ function tick() {
   const cd = $('countdown'), paused = !!drag;            // 橡皮擦模式也照常每分鐘載入，只有正在拖曳（擦、移動、縮放）時等放開再載入
   cd.classList.toggle('off', paused);
   cd.title = paused ? '拖曳中，放開後再載入' : '距離下次自動載入';
-  if (!paused && --left <= 0) { left = AUTO_SEC; if (LIVE_BASE) loadHosted(); else reload(true); }
+  if (!paused && --left <= 0) { left = AUTO_SEC; syncNow(); }
   cd.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
 setInterval(tick, 1000);
