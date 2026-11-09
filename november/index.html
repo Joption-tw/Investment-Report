@@ -2212,7 +2212,8 @@ function flash(text, bad) {
 
 $('btnOpen').onclick = $('drop').onclick = pickFile;
 // 同步數據：網站上重新抓 live 分支的資料；自己電腦開照舊重讀檔案
-const syncNow = () => LIVE_BASE ? loadHosted() : fileHandle ? reload() : loadSina();
+// 自己電腦開：按同步不跳「允許讀取檔案」視窗——已經允許過就讀本機 CSV，沒有就讀 GitHub 上的 CSV（慢 1~2 分鐘）
+const syncNow = () => { if (LIVE_BASE) { loadHosted(); return; } reload(true); loadSina(); };
 $('btnReload').onclick = syncNow;
 if (!LIVE_BASE) $('btnHome').href = 'https://joption-tw.github.io/Investment-Report/';   // 自己電腦開時，回總表要連到網站
 const SHORT_URL = LIVE_BASE ? location.host + location.pathname : SITE_URL;
