@@ -232,6 +232,19 @@
   #page-btn:hover { background: #334155; }
   #page-btn:active { background: #2563eb; transform: scale(.96); }
 
+  /* 電腦版：上半部（頁首＋盤別鈕）約占畫面 1/5，其餘給圖表（fitChart 把圖表撐到視窗底） */
+  @media (min-width: 768px) and (min-height: 601px) {
+    #app-root { padding-top: 6px; gap: 6px; }
+    #main { gap: 6px; }
+    header { padding: .6vh 20px; }
+    header h1 { font-size: clamp(18px, 3.2vh, 32px); }
+    header h1 span { font-size: clamp(12px, 2.2vh, 22px); }
+    .head-meta { margin-top: .3vh; }
+    #reloadBox { flex-direction: row; align-items: center; }
+    #session-row { padding: 3px 5px; }
+    #sessions { height: clamp(44px, 8vh, 72px); }
+  }
+
   @media (max-width: 767px) {
     header { display: flex; flex-direction: column; padding: 12px; }
     #btnHome { align-self: flex-start; }
