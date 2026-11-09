@@ -303,7 +303,7 @@ const buildWeek = (week, sessions, live, liveMarket, liveVix) => {
     sessions.filter(s => s.week === week).forEach(s => { recorded[s.slot] = s; });
     const prevWeekLast = sessions.filter(s => s.week < week).slice(-1)[0] || null;
     const now = nowStr();
-    let prev = null;
+    let prev = null, carried = false;
     return SLOT_DEFS.map((def, i) => {
         const date = slotDate(week, i);
         const state = recorded[i] || (live && live.week === week && live.slot === i ? live : null);
@@ -318,8 +318,14 @@ const buildWeek = (week, sessions, live, liveMarket, liveVix) => {
         const row = { i, def, date, state, market, live: !!state.live };
         let basePnl = null, basePersonal = null, baseAcc = {};
         if (i === 0) {
-            if (prevWeekLast && resetBase(state) === resetBase(prevWeekLast)) { row.pending = true; prev = state; return row; }
-            basePnl = 0; basePersonal = 0;
+            // 試算表的起始資產還沒重設（例：11/4 拖到 23:24 才重設）：累積獲利還接著上週，以上週最後一盤為基準
+            if (prevWeekLast && resetBase(state) === resetBase(prevWeekLast)) {
+                carried = true; row.carried = true;
+                basePnl = prevWeekLast.total.pnl; basePersonal = prevWeekLast.total.personal;
+                prevWeekLast.accounts.forEach(a => { baseAcc[a.name] = a.pnl; });
+            } else { basePnl = 0; basePersonal = 0; }
+        } else if (carried && prev && resetBase(state) !== resetBase(prev)) {   // 上一盤之後才重設：這一盤從重設起算
+            basePnl = 0; basePersonal = 0; carried = false;
         } else if (prev) {
             basePnl = prev.total.pnl; basePersonal = prev.total.personal;
             prev.accounts.forEach(a => { baseAcc[a.name] = a.pnl; });
@@ -333,7 +339,8 @@ const buildWeek = (week, sessions, live, liveMarket, liveVix) => {
             row.acc = {};
             state.accounts.forEach(a => { if (a.pnl !== null) row.acc[a.name] = a.pnl - (baseAcc[a.name] || 0); });
         }
-        row.cum = state.total.base ? state.total.pnl / state.total.base * 100 : null;
+        // 還沒重設時，試算表的累積是兩週合計，本週累積只算本週這幾盤
+        row.cum = !state.total.base ? null : carried ? (state.total.pnl - prevWeekLast.total.pnl) / state.total.base * 100 : state.total.pnl / state.total.base * 100;
         prev = state;
         return row;
     });
