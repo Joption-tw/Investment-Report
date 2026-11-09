@@ -66,6 +66,13 @@
         .hl-down { background: rgba(34, 197, 94, .18); }
         .hl-down .hl-chg { color: #4ade80; }
         .hl-stale { opacity: .45; }
+        /* 數字下面的說明（同監控頁）：比上一盤、參考價、資料時間；漲紅跌綠 */
+        .hl-subs { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 6px; color: #94a3b8; font-size: 11.5px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
+        .hl-subs .up { color: #fca5a5; }
+        .hl-subs .down { color: #4ade80; }
+        .hl-chip { display: inline-block; margin-bottom: 1px; padding: 1px 9px; border-radius: 999px; background: #1e293b; color: #cbd5e1; font-weight: 800; }
+        .hl-chip.up { background: rgba(239, 68, 68, .22); color: #fca5a5; }
+        .hl-chip.down { background: rgba(34, 197, 94, .2); color: #86efac; }
         /* 時間價值、期貨指數：格子本身是按鈕，點了放大走勢圖；數字旁邊是當盤的微型走勢 */
         .hl-btn { cursor: pointer; transition: background .15s; }
         .hl-btn:hover, .hl-btn:active { background: #1e293b; }
@@ -120,6 +127,7 @@
             .hl-pct { font-size: 12px; }
             .hl-body { flex-direction: column; gap: 3px; width: 100%; }
             .hl-spark { width: 100%; height: 30px; }
+            .hl-subs { display: none; }
             .tr-back { padding: 8px; }
             .tr-note { width: 100%; margin: 0; }
             .tr-controls { padding: 8px 10px; }
@@ -176,6 +184,7 @@
         html.m-portrait header .hl-spark { width: 100%; height: 90px; }
         html.m-portrait header .hl-spark polyline { stroke-width: 4px; }
         html.m-portrait header .hl-spark i { width: 12px; height: 12px; margin: -6px 0 0 -6px; }
+        html.m-portrait header .hl-subs, html.m-portrait header .hl-subs span, html.m-portrait header .hl-subs b { margin-top: 8px; font-size: 19px !important; white-space: normal; }
         html.m-portrait main { padding: 8px !important; }
         html.m-portrait #session-panel { padding: 0 8px 8px !important; }
         html.m-portrait #session-panel > div > * + * { margin-top: 8px !important; }
@@ -228,6 +237,7 @@
             header .hl-pct { font-size: 12px; }
             header .hl-body { flex-direction: row; gap: 4px; width: auto; }
             header .hl-spark { width: 56px; height: 34px; }
+            header .hl-subs, header .hl-label-x { display: none; }
             header .hl-refresh span:last-child { display: none; }
             header .hl-refresh span:first-child { font-size: 14px; }
 
@@ -394,11 +404,38 @@
             return wd >= 1 && wd <= 5 && ((m >= 525 && m <= 825) || m >= 900);
         };
 
-        // ===== 時間價值、期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列（時間價值的數字也是這一列）=====
+        // ===== 頁首時間價值：示範帳戶試算表的週三、週五時價（同監控頁），週五 13:30 結算前看週五合約，之後看下週三合約 =====
+        const tvKeyAt  = (week, t) => t < wallMs(`${addDays(week, 2)} 13:30`) ? 'bb' : 'ba';
+        const tvSettle = (week, key) => key === 'bb' ? addDays(week, 2) : addDays(week, 7);
+        // 試算表偶有壞值（例：38、56，或跳到 10 萬以上）：跟前面 30 筆的中位數差超過 15%（低價區 300 點）就不用
+        const cleanTv = vals => {
+            const ok = [];
+            return vals.map(v => {
+                if (v === null) return null;
+                const recent = ok.slice(-30).sort((a, b) => a - b), med = recent[recent.length >> 1];
+                if (recent.length >= 5 && Math.abs(v - med) > (med < 2000 ? 300 : med * .15)) return null;
+                ok.push(v);
+                return v;
+            });
+        };
+        const tvSeries = (demo, week, key) => {
+            if (!demo) return [];
+            const seg = demo.series.filter(p => tvKeyAt(week, p.t) === key);
+            const clean = cleanTv(seg.map(p => p[key]));
+            const pts = seg.map((p, i) => ({ t: p.t, tv: clean[i] })).filter(p => p.tv !== null);
+            // 再做 10 分鐘平滑（同監控頁）：取前 10 分鐘內的平均，單筆跳動不會被當成收盤
+            return pts.map(p => {
+                const win = pts.filter(q => q.t > p.t - 10 * 60e3 && q.t <= p.t);
+                return { t: p.t, tv: win.reduce((s, q) => s + q.tv, 0) / win.length, ...slotAt(new Date(p.t)) };
+            });
+        };
+        const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六'];
+
+        // ===== 期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列；時間價值走勢改用上面的試算表時價 =====
         const TREND_METRICS = {
-            tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '每 2 分鐘一筆，已濾掉資料跳點，可能和即時數字略有差距' },
+            tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '這一期合約的時價，來源是示範帳戶試算表（同監控頁），每 2 分鐘一筆，已濾掉壞值' },
             fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '數字是期交所近月台指期；曲線是下單程式每 2 分鐘的指數，兩者有價差' },
-            vix: { label: '波動率',   color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數，只有日盤；夜盤顯示最近一個日盤' }
+            vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數，只有日盤；夜盤顯示最近一個日盤' }
         };
         const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
                                  + `&tq=${encodeURIComponent(`select A,F,K where B starts with '示範帳號' and A >= '${since}'`)}&t=${Date.now()}`;
@@ -544,7 +581,7 @@
             return html`<div ref=${ref}></div>`;
         };
 
-        const TrendModal = ({ initial, current, onClose }) => {
+        const TrendModal = ({ initial, current, tvPts, onClose }) => {
             const [metric, setMetric] = useState(initial);
             const [range, setRange]   = useState('session');   // session = 當盤、week = 本週
             const [pts, setPts]       = useState(null);
@@ -568,7 +605,7 @@
                 return () => window.removeEventListener('keydown', onKey);
             }, [onClose]);
 
-            const source = metric === 'vix' ? vixPts : pts;
+            const source = metric === 'vix' ? vixPts : metric === 'tv' && tvPts && tvPts.length ? tvPts : pts;
             const last = source && source.length ? source[source.length - 1] : null;
             const rows = !last ? [] : range === 'week' ? source : source.filter(p => sessionKey(p) === sessionKey(last));
             const sub = !last ? '' : range === 'week' ? `本週 ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}` : `${SLOT_DEFS[last.slot].label} ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}`;
@@ -628,6 +665,16 @@
             // 頁首微型走勢（當盤）；trendKey = 目前放大的是哪一張圖
             const [trend, setTrend]             = useState([]);
             const [vixDay, setVixDay]           = useState([]);
+            const [vixQ, setVixQ]               = useState(null);
+            // 示範帳戶試算表本週的期指、週三週五時價（頁首時間價值、每盤績效表的時價都用它）
+            const [demo, setDemo]               = useState(null);
+            useEffect(() => {
+                const load = () => fetch(`${DEMO_URL}&t=${Date.now()}`).then(r => r.ok ? r.text() : '')
+                    .then(t => { if (t) setDemo(parseDemo(parseCSV(t), slotAt(tpeNow()).week)); }).catch(() => {});
+                load();
+                const timer = setInterval(load, 60000);
+                return () => clearInterval(timer);
+            }, []);
             const [trendKey, setTrendKey]       = useState(null);
             const closeTrend = useCallback(() => setTrendKey(null), []);
 
@@ -651,7 +698,7 @@
                 return () => clearInterval(timer);
             }, []);
             useEffect(() => {
-                const load = () => fetchVix().then(v => { const r = parseVixTicks(v); if (r.length) setVixDay(r); });
+                const load = () => fetchVix().then(v => { const r = parseVixTicks(v); if (r.length) setVixDay(r); if (v && v.quote) setVixQ(v.quote); });
                 load();
                 const timer = setInterval(load, 60000);
                 return () => clearInterval(timer);
@@ -924,27 +971,58 @@
             const pointsChangeNum = fut ? fut.diff : NaN;
             const pointsChangeFormatted = !fut ? '--' : (fut.diff > 0 ? '+' : '') + fut.diff.toFixed(0);
             const percentChange = fut ? `${fut.pct > 0 ? '+' : ''}${fut.pct.toFixed(2)}%` : '--';
-            const trendCell = (key, value, valueClass) => html`
+            const upDown = v => v > 0 ? 'up' : v < 0 ? 'down' : '';
+            const sgn = (v, d = 0) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+            const hms = s => s && s.length >= 6 ? `${s.slice(0, 2)}:${s.slice(2, 4)}:${s.slice(4, 6)}` : '';
+
+            // 時間價值：這一期合約（週五 13:30 前看週五，之後看下週三），比上一盤收盤；上一盤是另一期合約就不比
+            const nowT = tpeNow(), cur = slotAt(nowT), tvKey = tvKeyAt(cur.week, nowT.getTime());
+            const tvPts = tvSeries(demo, cur.week, tvKey);
+            const tvLast = tvPts.length ? tvPts[tvPts.length - 1] : null;
+            const tvPrevSlot = cur.slot > 0 && tvKeyAt(cur.week, wallMs(slotEnd(cur.week, cur.slot - 1))) === tvKey ? cur.slot - 1 : null;
+            const tvPrevPt = tvPrevSlot === null ? null : tvPts.filter(p => p.week === cur.week && p.slot === tvPrevSlot).pop() || null;
+            const tvSettleDay = tvSettle(cur.week, tvKey);
+            const tvLeftMs = wallMs(`${tvSettleDay} 13:30`) - nowT.getTime();
+            const tvLeft = tvLeftMs <= 0 ? '已結算' : (() => { let d = Math.floor(tvLeftMs / 864e5), h = Math.round(tvLeftMs % 864e5 / 36e5); if (h === 24) { d++; h = 0; } return `剩 ${d ? `${d} 天 ` : ''}${h} 小時`; })();
+            const tvValue = tvLast ? Math.round(tvLast.tv).toLocaleString() : topStats.timeValue;
+            const tvDiff = tvLast && tvPrevPt ? tvLast.tv - tvPrevPt.tv : null;
+            const tvSubs = tvLast && html`
+                ${tvDiff !== null
+                    ? html`<span className=${'hl-chip ' + upDown(tvDiff)}>${SLOT_DEFS[cur.slot].label}比${SLOT_DEFS[tvPrevSlot].label}收盤 ${sgn(tvDiff)}（${sgn(tvDiff / tvPrevPt.tv * 100, 1)}%）</span>`
+                    : html`<span className="hl-chip">${SLOT_DEFS[cur.slot].label}是這一期合約的第一盤</span>`}
+                ${tvPrevPt && html`<span>${SLOT_DEFS[tvPrevSlot].label}收盤時 ${Math.round(tvPrevPt.tv).toLocaleString()}</span>`}
+                <span>更新 ${mdLabel(ymd(new Date(tvLast.t)))}（${WEEKDAY[new Date(tvLast.t).getUTCDay()]}）${hhmm(tvLast.t)} ${tvValue}</span>`;
+
+            // 台指期：期交所近月；VIX：期交所，比前一交易日收盤
+            const futMonth = fut && (fut.name.match(/(\d{2})\d$/) || [])[1];
+            const futSubs = fut && html`
+                <span>漲跌是比前一交易日結算價 ${fut.ref.toLocaleString()}</span>
+                <span>${fut.session === 'D' ? '日盤' : '夜盤'}${futMarketOpen() ? '' : '已收盤'}，期交所報價 ${hms(fut.time)} 取得</span>`;
+            const vixNum = vixDay.length ? vixDay[vixDay.length - 1].vix : vixQ && (vixQ.last || vixQ.ref) || null;
+            const vixValue = vixNum ? vixNum.toFixed(2) : '--';
+            const vixRef = vixQ && vixQ.ref, vixChg = vixNum && vixRef && vixQ.last ? vixNum - vixRef : null;
+            const vixSubs = vixRef && html`
+                ${vixChg !== null ? html`<span><b className=${upDown(vixChg)}>${sgn(vixChg, 2)}</b> 比前一交易日收盤 ${vixRef.toFixed(2)}</span>` : html`<span>今天還沒開盤，前一交易日收盤 ${vixRef.toFixed(2)}</span>`}
+                <span>VIX 只有日盤，收盤後到隔天開盤前都是當天收盤值</span>`;
+
+            const trendCell = (key, value, valueClass, { label, values, extra, subs, cls = '' }) => html`
                 <button type="button" key=${key} onClick=${() => setTrendKey(key)} title=${`放大${TREND_METRICS[key].label}走勢圖`}
-                        className="hl-cell hl-btn flex-1 xl:flex-none flex flex-col items-center justify-center text-center">
-                    <span className="hl-label">${TREND_METRICS[key].label} ›</span>
+                        className=${"hl-cell hl-btn flex-1 xl:flex-none flex flex-col items-center justify-center text-center " + cls}>
+                    <span className="hl-label">${label || TREND_METRICS[key].label} ›</span>
                     <span className="hl-body">
                         <span className=${valueClass + " font-mono-data"}>${value}</span>
-                        <${Sparkline} values=${(key === 'vix' ? vixDay : trend).map(p => p[key])} color=${TREND_METRICS[key].spark} />
+                        ${extra}
+                        <${Sparkline} values=${values} color=${TREND_METRICS[key].spark} />
                     </span>
+                    ${subs && html`<span className="hl-subs">${subs}</span>`}
                 </button>`;
-            const vixValue = vixDay.length ? vixDay[vixDay.length - 1].vix.toFixed(2) : '--';
             const statCells = html`
-                ${trendCell('tv', topStats.timeValue, 'hl-tv')}
-                ${trendCell('fut', futValue, 'hl-fut' + futStale)}
-                <div className=${"hl-cell hl-chg-cell flex-1 xl:flex-none flex flex-col items-center justify-center text-center " + (pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '')}>
-                    <span className="hl-label">漲跌</span>
-                    <div className=${"hl-chg font-mono-data" + futStale}>
-                        <span className="hl-pts">${pointsChangeFormatted}</span>
-                        <span className="hl-pct">(${percentChange})</span>
-                    </div>
-                </div>
-                ${trendCell('vix', vixValue, 'hl-vix')}`;
+                ${trendCell('tv', tvValue, 'hl-tv', { label: tvLast ? html`時間價值<span className="hl-label-x"> · ${mdLabel(tvSettleDay)}週${WEEKDAY[new Date(tvSettleDay).getUTCDay()]} · ${tvLeft}</span>` : '時間價值',
+                    values: tvPts.filter(p => p.week === cur.week && p.slot === cur.slot).map(p => p.tv), subs: tvSubs })}
+                ${trendCell('fut', futValue, 'hl-fut' + futStale, { label: futMonth ? `台指期 ${+futMonth} 月` : '台指期', values: trend.map(p => p.fut), subs: futSubs,
+                    cls: pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '',
+                    extra: html`<span className=${"hl-chg font-mono-data" + futStale}><span className="hl-pts">${pointsChangeFormatted}</span><span className="hl-pct">(${percentChange})</span></span>` })}
+                ${trendCell('vix', vixValue, 'hl-vix', { values: vixDay.map(p => p.vix), subs: vixSubs })}`;
 
             return html`
                 <div id="app-root" className="flex flex-col min-h-screen bg-slate-50 select-none overflow-x-hidden">
@@ -1002,16 +1080,15 @@
                     <main className="p-1 sm:p-4 bg-[#f1f5f9]">
                         ${mainContent}
                     </main>
-                    <${SessionPanel} sessions=${sessions} live=${live} />
+                    <${SessionPanel} sessions=${sessions} live=${live} liveMarket=${(demo && demo.market) || {}} />
                     <button type="button" id="trend-btn" onClick=${() => setTrendKey('tv')}>走勢圖</button>
-                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: topStats.timeValue, fut: futValue, vix: vixValue }} onClose=${closeTrend} />`}
+                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: tvValue, fut: futValue, vix: vixValue }} tvPts=${tvPts} onClose=${closeTrend} />`}
                 </div>`;
         };
 
         // ===== 每盤績效表：一週 10 盤，每一盤的勝敗（資料處理與表格在 common.js）=====
         const PERSONAL_ROW = '__personal';
-        const SessionPanel = ({ sessions, live }) => {
-            const [liveMarket, setLiveMarket] = useState({});
+        const SessionPanel = ({ sessions, live, liveMarket }) => {
             const [liveVix, setLiveVix]       = useState(null);
             const [viewWeek, setViewWeek]     = useState('');
             // 補回資料的歷史週次（scripts/build_history_index.ts）：只含有補齊的帳號
@@ -1019,14 +1096,10 @@
             const currentWeek = (live && live.week) || slotAt(tpeNow()).week;
             useEffect(() => { fetch('data/history-index.json').then(r => r.ok ? r.json() : null).then(setHistory).catch(() => {}); }, []);
 
+            // 本週每盤的時價、百點震幅由上層（App）讀示範帳戶試算表後傳進來
             const loadMarket = useCallback(async () => {
-                const week = slotAt(tpeNow()).week;
-                const [d, v] = await Promise.allSettled([
-                    fetch(`${DEMO_URL}&t=${Date.now()}`).then(r => r.ok ? r.text() : ''),
-                    fetch(VIX_URL).then(r => r.ok ? r.json() : null)
-                ]);
-                if (d.status === 'fulfilled' && d.value) setLiveMarket((parseDemo(parseCSV(d.value), week) || {}).market || {});
-                if (v.status === 'fulfilled') setLiveVix(parseVix(v.value));
+                const v = await fetch(VIX_URL).then(r => r.ok ? r.json() : null).catch(() => null);
+                if (v) setLiveVix(parseVix(v));
             }, []);
 
             useEffect(() => {
