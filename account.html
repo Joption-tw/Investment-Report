@@ -38,7 +38,7 @@
     <script src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
-    <script src="common.js?v=20261107a"></script>
+    <script src="common.js?v=20261109a"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         html, body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
@@ -419,6 +419,7 @@
             const name = ACCT ? ACCT.name : null;
             const [sessions, setSessions] = useState([]);
             const [snaps, setSnaps]       = useState([]);
+            const [liveOpen, setLiveOpen] = useState(null);
             const [series, setSeries]     = useState({});   // 週 → data/series 存檔
             const [demo, setDemo]         = useState({});   // 週 → { market, series }
             const [vix, setVix]           = useState(null);
@@ -518,6 +519,8 @@
                 if (er) setErased(parseErasures(parseCSV(er)));
                 if (sn || lg) setSnaps([...(lg ? parseLog(parseCSV(lg)) : []), ...(sn ? parseSnapshots(parseCSV(sn)) : [])].sort((a, b) => b.t - a.t));
                 setVix(parseVix(v));
+                const cur = slotAt(tpeNow());
+                setLiveOpen({ ...cur, open: await fetchSessionOpen(cur.week, cur.slot) });
                 setUpdated(new Date());
                 setLoading(false);
             }, []);
@@ -581,7 +584,7 @@
             const demoSeries = demoWeek && demoWeek.series ? despike(demoWeek.series, ['fut', 'ba', 'bb']) : [];
 
             const views = sessions.map(s => accountView(s, name)).filter(Boolean);
-            const latestSnap = isCurrent && snaps[0] ? accountView(snaps[0], name) : null;
+            const latestSnap = isCurrent && snaps[0] ? accountView({ ...snaps[0], open: liveOpen && liveOpen.open && liveOpen.week === snaps[0].week && liveOpen.slot === snaps[0].slot ? liveOpen.open : undefined }, name) : null;
             const rows = buildWeek(week, views, latestSnap ? { ...latestSnap, live: true } : null, (demoWeek && demoWeek.market) || {}, isCurrent ? vix : null);
             const sum = summarize(rows);
             // 官方為主、推算為輔：週累積用官方；每盤獲利兩邊一樣不動；官方起算前的盤累積顯示「—」

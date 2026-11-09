@@ -163,7 +163,7 @@ const parseLog = (rows) => {
         for (const r of group) {
             const name = r[1].trim();
             if (name.startsWith('歐大總績效')) { total = { pnl: toNum(r[6]), personal: toNum(r[4]), base: accounts.reduce((s, a) => s + (a.base || 0), 0) }; break; }
-            accounts.push({ name: cleanName(name), pnl: toNum(r[6]), base: toNum(r[12]), ratio: toNum(r[3]), delta: toNum(r[4]), tv: toNum(r[5]),
+            accounts.push({ name: cleanName(name), upd: String(r[2] || '').trim(), pnl: toNum(r[6]), base: toNum(r[12]), ratio: toNum(r[3]), delta: toNum(r[4]), tv: toNum(r[5]),
                             rate: toNum(r[7]), margin: toNum(r[9]), asset: toNum(r[11]), pts: toNum(r[13]) });
         }
         const t = wallMs(stamp);
@@ -295,18 +295,40 @@ const accountView = (s, name) => {
              open: s.open && s.open.accounts[name] !== undefined ? { ...s.open, total: s.open.accounts[name] } : undefined };
 };
 
+// 收盤快照常在最後幾秒平倉之前就記了（例：11/9 凱基 13:45:29 還剩 108 點，15:02 才看到 0 點、多 184 元），
+// 那筆差額會被算進下一盤。下一盤開盤後 15 分鐘內、這個帳號還沒進場前（沒有口數）的最後一筆 = 上一盤真正的收盤，差額算回上一盤。
+// 開盤第一筆常是上傳程式還沒更新的舊資料（還是收盤前的口數），所以不直接用第一筆。
+// 起始資產變了（週三重設）不搬；差額超過起始資產 1% 的是出入金，也不搬。
+// next.open.flat = { 帳號: { pnl, base } }：已收的盤由 record_sessions.py 存，現在這一盤由網頁補（fetchSessionOpen）
+const settleClose = (s, next) => {
+    const flat = next && next.open && next.open.flat;
+    if (!s || !flat || s.total.pnl === null) return s;
+    let diff = 0;
+    const accounts = s.accounts.map(a => {
+        const f = flat[a.name];
+        if (!f || a.pnl === null || f.pnl === null || f.pnl === a.pnl || !a.base || f.base !== a.base) return a;
+        if (Math.abs(f.pnl - a.pnl) > a.base * 0.01) return a;
+        diff += f.pnl - a.pnl;
+        return { ...a, pnl: f.pnl, settled: f.pnl - a.pnl };
+    });
+    return diff ? { ...s, accounts, total: { ...s.total, pnl: s.total.pnl + diff }, settled: diff } : s;
+};
+
 // ===== 一週 10 盤：每盤的勝敗、獲利、累積 =====
 // 每盤獲利 = 本盤收盤的本週累積獲利 − 上一盤收盤的本週累積獲利（週三夜盤是一週第一盤，起始資產重設後從 0 起算）
 const buildWeek = (week, sessions, live, liveMarket, liveVix) => {
     const resetBase = s => s.total.resetBase !== undefined ? s.total.resetBase : s.total.base;
+    const raw = SLOT_DEFS.map((_, i) => sessions.find(s => s.week === week && s.slot === i) || (live && live.week === week && live.slot === i ? live : null));
+    const nextWeekFirst = sessions.find(s => s.week > week);
     const recorded = {};
-    sessions.filter(s => s.week === week).forEach(s => { recorded[s.slot] = s; });
-    const prevWeekLast = sessions.filter(s => s.week < week).slice(-1)[0] || null;
+    raw.forEach((s, i) => { if (s && !s.live) recorded[i] = settleClose(s, raw[i + 1] || (i === 9 && nextWeekFirst && nextWeekFirst.slot === 0 ? nextWeekFirst : null)); });
+    const liveState = live && live.week === week ? live : null;
+    const prevWeekLast = settleClose(sessions.filter(s => s.week < week).slice(-1)[0] || null, raw[0]);
     const now = nowStr();
     let prev = null, carried = false;
     return SLOT_DEFS.map((def, i) => {
         const date = slotDate(week, i);
-        const state = recorded[i] || (live && live.week === week && live.slot === i ? live : null);
+        const state = recorded[i] || (liveState && liveState.slot === i ? liveState : null);
         const market = { ...(liveMarket[i] || {}), ...((recorded[i] && recorded[i].market) || {}) };
         // VIX 只有日盤有：夜盤用同一天日盤的 VIX（舊存檔的夜盤沒存，從同一天的日盤找）
         if (!market.vix) { const day = sessions.find(s => s.date === date && s.market && s.market.vix); if (day) market.vix = day.market.vix; }
@@ -370,6 +392,35 @@ const fillMissing = async (sessions, week) => {
         return s ? { week, slot: i, at: stampOf(s.t), fut: s.fut, total: s.total, accounts: s.accounts, filled: true } : null;
     }).filter(Boolean);
     return filled.length ? [...sessions, ...filled].sort((a, b) => a.week < b.week ? -1 : a.week > b.week ? 1 : a.slot - b.slot) : sessions;
+};
+
+// 現在這一盤開盤後 15 分鐘的快照（兩分鐘紀錄）→ open：第一筆的獲利，加上各帳號還沒進場前最後一筆沒口數的獲利（flat，給 settleClose）
+// 已收的盤由 record_sessions.py 存在 sessions.json 的 open；現在這一盤由網頁補
+// 帳號的「更新時間」寫「斷線 N 分」或早於開盤 = 上傳程式還沒重新連上，那筆是上一盤的舊資料，不算
+const SETTLE_WINDOW = 15 * 60e3;
+const freshUpd = (u, hm) => { if (u === undefined) return true; const m = String(u).match(/^(\d{1,2}):(\d{2}):\d{2}$/); return !!m && `${m[1].padStart(2, '0')}:${m[2]}` >= hm; };
+const openFrom = (snaps, hm) => {   // snaps：同一盤、時間由舊到新；hm：開盤時間 '15:00' / '08:45'
+    const flat = {}, entered = {};
+    snaps.forEach(x => x.accounts.forEach(a => {
+        if (entered[a.name] || a.pts === null || a.pnl === null || a.asset === null || !freshUpd(a.upd, hm)) return;   // 資產讀不到的是壞資料
+        if (a.pts !== 0) entered[a.name] = true; else flat[a.name] = { pnl: a.pnl, base: a.base };
+    }));
+    const first = snaps[0];
+    return { at: stampOf(first.t), total: first.total.pnl, accounts: Object.fromEntries(first.accounts.map(a => [a.name, a.pnl])), flat };
+};
+const openCache = {};
+const fetchSessionOpen = async (week, slot) => {
+    const key = `${week}#${slot}`;
+    if (openCache[key]) return openCache[key];
+    const start = wallMs(slotOpen(week, slot));
+    const cond = `A >= '${stampOf(start)}' and A <= '${stampOf(start + SETTLE_WINDOW)}'`;
+    const url = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}&tq=${encodeURIComponent(`select * where ${cond}`)}`;
+    const text = await fetch(`${url}&t=${Date.now()}`).then(r => r.ok ? r.text() : '').catch(() => '');
+    const snaps = text ? parseLog(parseCSV(text)).filter(x => x.week === week && x.slot === slot).reverse() : [];   // parseLog 新的在前
+    if (!snaps.length) return null;
+    const open = openFrom(snaps, slotOpen(week, slot).slice(11));
+    if (tpeNow().getTime() > start + SETTLE_WINDOW + 60e3) openCache[key] = open;   // 15 分鐘還沒過完，下次再抓
+    return open;
 };
 
 // 總表的「當盤獲利」：現在這一盤開盤前的累積獲利（基準），總表每 10 秒的累積獲利減掉它就是當盤

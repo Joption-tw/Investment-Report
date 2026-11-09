@@ -37,7 +37,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="common.js?v=20261107a"></script>
+    <script src="common.js?v=20261109a"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -711,7 +711,11 @@
                     fetch(`${LIVE_URL}&t=${t}`).then(r => r.ok ? r.text() : '')
                 ]);
                 if (s.status === 'fulfilled' && s.value) setSessions(await fillMissing(s.value.sessions || [], slotAt(tpeNow()).week));
-                if (l.status === 'fulfilled' && l.value) { const snap = parseSnapshots(parseCSV(l.value))[0]; setLive(snap ? { ...snap, live: true } : null); }
+                if (l.status === 'fulfilled' && l.value) {
+                    const snap = parseSnapshots(parseCSV(l.value))[0];
+                    const open = snap ? await fetchSessionOpen(snap.week, snap.slot) : null;   // 上一盤收盤後才結算的差額要算回上一盤
+                    setLive(snap ? { ...snap, live: true, open: open || undefined } : null);
+                }
             }, []);
             useEffect(() => {
                 loadSessions();

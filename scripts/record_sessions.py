@@ -56,6 +56,31 @@ def week_of(date, typ):
     return date - timedelta(days=back)
 
 
+def session_open(date, typ):
+    return datetime(date.year, date.month, date.day, 8, 45, tzinfo=TPE) if typ == 'D' else datetime(date.year, date.month, date.day, 15, 0, tzinfo=TPE)
+
+
+def fresh(upd, hm):
+    """帳號的「更新時間」寫「斷線 N 分」或早於開盤 = 上傳程式還沒重新連上，那筆是上一盤的舊資料"""
+    if upd is None: return True
+    m = re.match(r'^(\d{1,2}):(\d{2}):\d{2}$', upd.strip())
+    return bool(m) and f'{int(m.group(1)):02d}:{m.group(2)}' >= hm
+
+
+def flat_at_open(snaps, hm):
+    """開盤後 15 分鐘內、各帳號還沒進場前（沒有口數）最後一筆的獲利 / 起始資產：上一盤真正的收盤
+    收盤快照常在最後幾秒平倉之前就記了，開盤第一筆又常是上傳程式還沒更新的舊資料，所以網頁（settleClose）用這個把差額算回上一盤
+    snaps：同一盤、時間由舊到新；hm：開盤時間 '15:00' / '08:45'"""
+    flat, entered = {}, set()
+    for snap in snaps:
+        for a in snap['accounts']:
+            if a['name'] in entered or a['pts'] is None or a['pnl'] is None or a.get('asset') is None: continue   # 資產讀不到的是壞資料
+            if not fresh(a.get('upd'), hm): continue
+            if a['pts'] != 0: entered.add(a['name'])
+            else: flat[a['name']] = {'pnl': a['pnl'], 'base': a['base']}
+    return flat
+
+
 def session_end(date, typ):
     if typ == 'D': return datetime(date.year, date.month, date.day, 13, 45, tzinfo=TPE)
     d = date + timedelta(days=1)
@@ -78,7 +103,7 @@ def read_snapshots():
             if name.startswith('歐大總績效'):
                 total = {'pnl': num(c[7]), 'personal': num(c[5]), 'base': sum(a['base'] or 0 for a in accounts)}
                 break
-            accounts.append({'name': clean_name(name), 'pnl': num(c[7]), 'base': num(c[13]),
+            accounts.append({'name': clean_name(name), 'upd': c[3], 'pnl': num(c[7]), 'base': num(c[13]),
                              'ratio': num(c[4]), 'delta': num(c[5]), 'tv': num(c[6]), 'rate': num(c[8]),
                              'margin': num(c[10]), 'asset': num(c[12]), 'pts': num(c[14])})
         if total and total['pnl'] is not None and accounts:
@@ -109,7 +134,7 @@ def read_log_snapshots(hours=30):
             if name.startswith('歐大總績效'):
                 total = {'pnl': num(r[6]), 'personal': num(r[4]), 'base': sum(a['base'] or 0 for a in accounts)}
                 break
-            accounts.append({'name': clean_name(name), 'pnl': num(r[6]), 'base': num(r[12]),
+            accounts.append({'name': clean_name(name), 'upd': r[2], 'pnl': num(r[6]), 'base': num(r[12]),
                              'ratio': num(r[3]), 'delta': num(r[4]), 'tv': num(r[5]), 'rate': num(r[7]),
                              'margin': num(r[9]), 'asset': num(r[11]), 'pts': num(r[13])})
         if total and total['pnl'] is not None and accounts:
@@ -243,12 +268,13 @@ def main():
     save_series(snaps)
 
     # 每一盤：收盤前最後一筆（同時間有兩筆時取上面那筆＝較新）與開盤第一筆
-    last, first = {}, {}
+    last, first, early = {}, {}, {}
     for snap in snaps:
         key = session_of(snap['ts'])
         if not key: continue
         if key not in last or snap['ts'] > last[key]['ts']:   last[key] = snap
         if key not in first or snap['ts'] <= first[key]['ts']: first[key] = snap
+        if snap['ts'] <= session_open(*key) + timedelta(minutes=15): early.setdefault(key, {})[snap['ts']] = snap
 
     for (date, typ), snap in last.items():
         if now < session_end(date, typ) + timedelta(minutes=5): continue   # 還沒收盤
@@ -262,7 +288,12 @@ def main():
         op = first[(date, typ)]
         open_ = {'at': op['ts'].strftime('%Y-%m-%d %H:%M:%S'), 'total': op['total']['pnl'],
                  'accounts': {a['name']: a['pnl'] for a in op['accounts']}}
-        if old.get('open') and old['open']['at'] <= open_['at']: open_ = old['open']   # 較早的快照捲掉了，保留已存的開盤第一筆
+        if old.get('open') and old['open']['at'] <= open_['at']: open_ = {k: v for k, v in old['open'].items() if k != 'flat'}   # 較早的快照捲掉了，保留已存的開盤第一筆
+        ea = early.get((date, typ))
+        if ea and min(ea) <= session_open(date, typ) + timedelta(minutes=3):   # 開盤頭幾分鐘的快照都還在才算 flat
+            open_['flat'] = flat_at_open([ea[t] for t in sorted(ea)], session_open(date, typ).strftime('%H:%M'))
+        elif old.get('open', {}).get('flat') is not None:
+            open_['flat'] = old['open']['flat']
         by_id[sid] = {
             'id': sid, 'week': week.isoformat(), 'slot': slot, 'date': date.isoformat(), 'type': typ,
             'at': at, 'fut': snap['fut'], 'total': snap['total'],
