@@ -468,14 +468,14 @@
         };
         const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六'];
 
-        // ===== 期貨指數走勢：讀「兩分鐘紀錄」各帳號那一列取中位數；時間價值走勢改用上面的試算表時價 =====
+        // ===== 期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列；時間價值走勢改用上面的試算表時價 =====
         const TREND_METRICS = {
             tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '這一期合約的時間價值：下單程式回報值，以凱基程式為主，沒更新時用其他帳號的中位數，每 2 分鐘一筆' },
-            fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', note: '數字是期交所近月台指期；曲線是各帳號下單程式每 2 分鐘回報的指數取中位數，兩者有價差' },
+            fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '數字是期交所近月台指期；曲線是下單程式每 2 分鐘的指數，兩者有價差' },
             vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數，只有日盤；夜盤顯示最近一個日盤' }
         };
         const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
-                                 + `&tq=${encodeURIComponent(`select A,B,F,K where A >= '${since}' and C matches '[0-9]+:[0-9]{2}:[0-9]{2}'`)}&t=${Date.now()}`;
+                                 + `&tq=${encodeURIComponent(`select A,F,K where B starts with '示範帳號' and A >= '${since}'`)}&t=${Date.now()}`;
         const sessionKey = p => `${p.week}-${p.slot}`;
         // 資料偶爾連續幾筆跳到離譜的數字（例：期指 46,000 跳 48,050），3 點平均濾不掉，所以用前後幾筆的中位數；每一盤分開算
         const medianIn = (pts, key, win) => pts.map((_, i) => {
@@ -490,46 +490,14 @@
                 if (j - i >= STALE_RUN) for (let k = i; k < j; k++) { pts[k].tv = null; pts[k].fut = null; }
             }
         };
-        // 期指：同一個時間點所有有在更新的帳號取中位數，大家都看到的快速漲跌會留下來
-        // （原本只用示範帳號再前後 7 筆取中位數，11/10 16:12 衝到 42,700、16:59 的 42,720 都被磨平了）。
-        // 有些帳號的程式報價會卡住，一直回報同一個數字（例：41,730、39,549），有時卡住的比正常的還多，所以先濾兩道：
-        //   1. 同一個帳號、一模一樣的數字前後隔超過 20 分鐘還在出現 = 卡住的值，整組不用
-        //   2. 跟同一盤前後各 6 筆所有帳號的中位數差超過 1% 的不用（例：只有幾個帳號跳到 42,534，實際在 40,100）
-        // 時間價值仍用示範帳號那一列，前後幾筆取中位數
-        const STUCK_SPAN = 20 * 60e3, FUT_BAND = .01, FUT_WIN = 6;
         const parseTrend = (rows) => {
-            const recs = [], tvAt = new Map(), span = new Map();
-            rows.slice(1).forEach(r => {
-                const t = wallMs(r[0]);
-                if (t === null) return;
-                const name = String(r[1]).trim(), fut = toNum(r[3]);
-                if (name.startsWith('示範帳號')) tvAt.set(t, toNum(r[2]));
-                if (!(fut > 1000)) return;
-                recs.push({ t, k: `${name}|${fut}`, fut });
-                const sp = span.get(`${name}|${fut}`);
-                span.set(`${name}|${fut}`, sp ? [Math.min(sp[0], t), Math.max(sp[1], t)] : [t, t]);
-            });
-            const futsAt = new Map([...tvAt.keys()].map(t => [t, []]));
-            recs.forEach(x => {
-                if (!futsAt.has(x.t)) futsAt.set(x.t, []);
-                const sp = span.get(x.k);
-                if (sp[1] - sp[0] <= STUCK_SPAN) futsAt.get(x.t).push(x.fut);
-            });
-            const raw = [...futsAt.keys()].sort((x, y) => x - y).map(t => ({ t, tv: tvAt.has(t) ? tvAt.get(t) : null, fut: null, futs: futsAt.get(t), ...slotAt(new Date(t)) }));
-            const sessions = new Map();
-            raw.forEach(p => { const k = sessionKey(p); if (!sessions.has(k)) sessions.set(k, []); sessions.get(k).push(p); });
-            sessions.forEach(g => g.forEach((p, i) => {
-                const near = g.slice(Math.max(0, i - FUT_WIN), i + FUT_WIN + 1).flatMap(q => q.futs);
-                if (!near.length || !p.futs.length) return;
-                const ref = medianOf(near), ok = p.futs.filter(v => Math.abs(v - ref) <= ref * FUT_BAND);
-                if (ok.length) p.fut = medianOf(ok);
-            }));
-            const pts = raw.map(({ futs, ...p }) => p);
+            const pts = rows.slice(1).map(r => ({ t: wallMs(r[0]), tv: toNum(r[1]), fut: toNum(r[2]) || null })).filter(p => p.t !== null)
+                            .map(p => ({ ...p, ...slotAt(new Date(p.t)) }));
             const groups = new Map();
             pts.forEach(p => { const k = sessionKey(p); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
             groups.forEach(g => {
                 dropStale(g);
-                ['tv'].forEach(key => {
+                ['tv', 'fut'].forEach(key => {
                     const clean = medianIn(g, key, TREND_METRICS[key].win);
                     g.forEach((p, i) => { p[key] = clean[i]; });
                 });
