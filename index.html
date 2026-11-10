@@ -511,9 +511,16 @@
         };
         // 相對高低點：走勢反轉超過整段高低差 15% 才算一個轉折（同百點震幅的找法，門檻跟著圖的幅度走）
         // vals 可以有 null（盤與盤之間斷開）；回傳 [{ i, hi }]，最後一段還在走的高點或低點也算
-        const findTurns = (vals) => {
+        // 點太多看不清楚（時間價值常常幾分鐘就上下跳一兩千）：超過 max 個就把門檻一直調高 2 成，直到剩下最明顯的幾段
+        const TURNS_MAX = { session: 8, week: 12 };
+        const findTurns = (vals, max) => {
             const ok = v => v !== null && v !== undefined && !isNaN(v);
-            const shown = vals.filter(ok), th = shown.length ? (Math.max(...shown) - Math.min(...shown)) * .15 : 0;
+            const shown = vals.filter(ok), range = shown.length ? Math.max(...shown) - Math.min(...shown) : 0;
+            let turns = zigzag(vals, range * .15, ok);
+            for (let th = range * .15 * 1.2; max && turns.length > max && th < range; th *= 1.2) turns = zigzag(vals, th, ok);
+            return turns;
+        };
+        const zigzag = (vals, th, ok) => {
             const turns = [];
             let trend = 0, hi = -1, lo = -1;
             vals.forEach((v, i) => {
@@ -619,7 +626,7 @@
                     line.push(p);
                 });
                 const vals = line.map(p => p[metric]);
-                const turns = findTurns(vals);
+                const turns = findTurns(vals, TURNS_MAX[showSessions ? 'week' : 'session']);
                 const turnPoint = t => ({ coord: [t.i, vals[t.i]], value: vals[t.i], symbolSize: mPortrait ? 12 : 6, itemStyle: { color: t.hi ? '#ef4444' : '#10b981' },
                     label: { color: t.hi ? '#ef4444' : '#10b981', position: t.hi ? 'top' : 'bottom', offset: [0, t.hi ? -5 : 5], fontWeight: 'bold', formatter: p => fmtTrend(p.value, m.d) } });
                 // 每一段（相鄰高低點之間）的中間寫這一段的高低差：漲紅、跌綠，底色讓字壓在線上也看得清楚
@@ -693,7 +700,7 @@
             const msg = failed && metric !== 'vix' ? `${failed}，稍後再試` : !source || !ready ? '載入中…' : !rows.length ? '這一週還沒有走勢資料' : null;
             // 相鄰高低點相差多少（跟圖上標的點同一套找法），加總 = 這段走勢來回走了多少
             const legVals = rows.map(p => p[metric]);
-            const legTurns = msg ? [] : findTurns(legVals);
+            const legTurns = msg ? [] : findTurns(legVals, TURNS_MAX[range]);
             const legs = legTurns.slice(1).map((t, k) => ({ from: legVals[legTurns[k].i], to: legVals[t.i], at: rows[t.i].t }))
                                  .map(l => ({ ...l, diff: l.to - l.from }));
             const legSum = legs.reduce((s, l) => s + Math.abs(l.diff), 0);
