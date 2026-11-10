@@ -538,6 +538,7 @@
             return turns;
         };
         const fmtTrend = (v, d) => v === null || v === undefined ? '—' : d ? v.toFixed(d) : Math.round(v).toLocaleString();
+        const fmtLeg = (v, d) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtTrend(Math.abs(v), d)}`;
 
         // 波動率：期交所每 15 秒一筆、只有日盤；畫圖每 2 分鐘取一筆（最後一筆一定留著）
         const parseVixTicks = (v) => {
@@ -621,6 +622,13 @@
                 const turns = findTurns(vals);
                 const turnPoint = t => ({ coord: [t.i, vals[t.i]], value: vals[t.i], symbolSize: mPortrait ? 12 : 6, itemStyle: { color: t.hi ? '#ef4444' : '#10b981' },
                     label: { color: t.hi ? '#ef4444' : '#10b981', position: t.hi ? 'top' : 'bottom', offset: [0, t.hi ? -5 : 5], fontWeight: 'bold', formatter: p => fmtTrend(p.value, m.d) } });
+                // 每一段（相鄰高低點之間）的中間寫這一段的高低差：漲紅、跌綠，底色讓字壓在線上也看得清楚
+                const legPoint = (t, k) => {
+                    const a = turns[k], diff = vals[t.i] - vals[a.i], up = diff > 0;
+                    return { coord: [Math.round((a.i + t.i) / 2), (vals[a.i] + vals[t.i]) / 2], value: diff, symbolSize: 0,
+                        label: { color: up ? '#dc2626' : '#059669', backgroundColor: up ? '#fef2f2' : '#ecfdf5', borderColor: up ? '#fecaca' : '#a7f3d0', borderWidth: 1,
+                                 borderRadius: 6, padding: mPortrait ? [6, 10] : [3, 6], position: 'inside', fontWeight: 'bold', formatter: p => fmtLeg(p.value, m.d) } };
+                };
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
@@ -642,7 +650,7 @@
                     series: [{ name: m.label, type: 'line', data: line.map(p => p[metric]), connectNulls: false, showSymbol: false,
                         lineStyle: { width: mPortrait ? 4 : 2, color: m.color }, itemStyle: { color: m.color }, emphasis: { disabled: true },
                         markPoint: { symbol: 'circle', symbolSize: 0, label: { show: true, fontSize: mPortrait ? 26 : mLandscape ? 10 : 12 },
-                                     data: turns.map(turnPoint) } }]
+                                     data: [...turns.slice(1).map(legPoint), ...turns.map(turnPoint)] } }]
                 }, true);
                 chart.current.resize();
             }, [rows, metric, showSessions, turned]);
@@ -691,7 +699,7 @@
             const legSum = legs.reduce((s, l) => s + Math.abs(l.diff), 0);
             const legUp = legs.filter(l => l.diff > 0).reduce((s, l) => s + l.diff, 0);
             const d = TREND_METRICS[metric].d;
-            const legFmt = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtTrend(Math.abs(v), d)}`;
+            const legFmt = v => fmtLeg(v, d);
             const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
 
             return ReactDOM.createPortal(html`
