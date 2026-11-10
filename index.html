@@ -404,36 +404,60 @@
             return wd >= 1 && wd <= 5 && ((m >= 525 && m <= 825) || m >= 900);
         };
 
-        // ===== 頁首時間價值：示範帳戶試算表的週三、週五時價（同監控頁），週五 13:30 結算前看週五合約，之後看下週三合約 =====
+        // ===== 頁首時間價值：週五 13:30 結算前看週五合約，之後看下週三合約（下單程式也是看最近一期還沒結算的合約）=====
         const tvKeyAt  = (week, t) => t < wallMs(`${addDays(week, 2)} 13:30`) ? 'bb' : 'ba';
         const tvSettle = (week, key) => key === 'bb' ? addDays(week, 2) : addDays(week, 7);
-        // 試算表偶有壞值（例：38、56，或跳到 10 萬以上）：跟前面 30 筆的中位數差超過 15%（低價區 300 點）就不用
-        const cleanTv = vals => {
-            const ok = [];
-            return vals.map(v => {
-                if (v === null) return null;
-                const recent = ok.slice(-30).sort((a, b) => a - b), med = recent[recent.length >> 1];
-                if (recent.length >= 5 && Math.abs(v - med) > (med < 2000 ? 300 : med * .15)) return null;
-                ok.push(v);
-                return v;
-            });
+        // 各帳號下單程式回報的「時間價值」（績效表 G 欄，兩分鐘紀錄 F 欄）都是最近一期還沒結算的合約，跟 tvKeyAt 一致。
+        // 以凱基程式（歐大_凱基，其次獨孤求敗_元富）為主：夜盤冷門時段群益程式的值會亂跳（11/10 03:45 同一時間 15,000～107,000 都有），
+        // 凱基、元富程式一直穩定。這兩個 5 分鐘內都沒更新，才用其他有在更新的帳號的中位數（至少 3 個）。
+        // 其他帳號意見一致（中間一半差不到 5%）而凱基跟它們差超過 15%，就是凱基那筆怪，改用中位數。
+        // 結算後到夜盤開盤前（13:30～15:00）是已結算的舊合約，不用；這一期還剩一天以上時，2,000 以下是還沒換合約的舊值，不用。
+        // （原本用示範帳戶試算表的 KGI 時價，11/9 23:12 之後停住沒更新，頁首卡在 38,107，所以改用這裡）
+        const TV_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
+            + `&tq=${encodeURIComponent(`select A,B,C,F where A >= '${since}' and C matches '[0-9]+:[0-9]{2}:[0-9]{2}'`)}&t=${Date.now()}`;
+        const TV_FRESH = 5 * 60e3;
+        const TV_MAIN = ['歐大_凱基', '獨孤求敗_元富'];
+        const updMs = (t, upd) => {   // 更新時間只有時分秒：放到 t 那一天，比 t 晚太多就是前一天
+            const m = String(upd || '').trim().match(/^(\d{1,2}):(\d{2}):(\d{2})$/);
+            if (!m) return null;
+            const d = new Date(t);
+            const u = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), +m[1], +m[2], +m[3]);
+            return u > t + TV_FRESH ? u - 864e5 : u;
         };
-        const tvSeries = (demo, week, key) => {
-            if (!demo) return [];
-            const seg = demo.series.filter(p => tvKeyAt(week, p.t) === key);
-            const clean = cleanTv(seg.map(p => p[key]));
-            const pts = seg.map((p, i) => ({ t: p.t, tv: clean[i] })).filter(p => p.tv !== null);
-            // 再做 10 分鐘平滑（同監控頁）：取前 10 分鐘內的平均，單筆跳動不會被當成收盤
-            return pts.map(p => {
-                const win = pts.filter(q => q.t > p.t - 10 * 60e3 && q.t <= p.t);
-                return { t: p.t, tv: win.reduce((s, q) => s + q.tv, 0) / win.length, ...slotAt(new Date(p.t)) };
+        const medianOf = v => { const s = [...v].sort((x, y) => x - y), h = s.length >> 1; return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; };
+        const tvPick = (t, rows) => {   // rows：[{ name, upd, tv }]
+            const week = slotAt(new Date(t)).week, key = tvKeyAt(week, t);
+            const left = wallMs(`${tvSettle(week, key)} 13:30`) - t;
+            const lastSettle = wallMs(`${key === 'bb' ? week : addDays(week, 2)} 13:30`);
+            if (t >= lastSettle && t - lastSettle < 90 * 60e3) return null;
+            const fresh = rows.filter(r => { const u = updMs(t, r.upd); return r.tv > 0 && u !== null && t - u <= TV_FRESH && !(left > 864e5 && r.tv < 2000); })
+                              .map(r => ({ ...r, name: cleanName(r.name) }));
+            const others = fresh.filter(r => !TV_MAIN.includes(r.name)).map(r => r.tv).sort((x, y) => x - y);
+            const med = others.length >= 3 ? medianOf(others) : null;
+            const agree = med !== null && others.length >= 5 && others[Math.floor(others.length / 4)] >= med * .95 && others[Math.ceil(others.length * 3 / 4) - 1] <= med * 1.05;
+            for (const name of TV_MAIN) {
+                const r = fresh.find(x => x.name === name);
+                if (r && !(agree && Math.abs(r.tv - med) > med * .15)) return r.tv;
+            }
+            return med;
+        };
+        const fetchTvSeries = async (since) => {
+            const r = await fetch(TV_URL(since.replace(/-/g, '/')));
+            if (!r.ok) throw new Error('無法讀取時間價值');
+            const groups = new Map();
+            parseCSV(await r.text()).slice(1).forEach(row => {
+                const t = wallMs(row[0]);
+                if (t === null) return;
+                if (!groups.has(t)) groups.set(t, []);
+                groups.get(t).push({ name: row[1], upd: row[2], tv: toNum(row[3]) });
             });
+            return [...groups].sort((x, y) => x[0] - y[0]).map(([t, rows]) => ({ t, tv: tvPick(t, rows), ...slotAt(new Date(t)) })).filter(p => p.tv !== null);
         };
         const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六'];
 
         // ===== 期貨指數走勢：讀「兩分鐘紀錄」裡示範帳號那一列；時間價值走勢改用上面的試算表時價 =====
         const TREND_METRICS = {
-            tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '這一期合約的時價，來源是示範帳戶試算表（同監控頁），每 2 分鐘一筆，已濾掉壞值' },
+            tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '這一期合約的時間價值：下單程式回報值，以凱基程式為主，沒更新時用其他帳號的中位數，每 2 分鐘一筆' },
             fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '數字是期交所近月台指期；曲線是下單程式每 2 分鐘的指數，兩者有價差' },
             vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數，只有日盤；夜盤顯示最近一個日盤' }
         };
@@ -612,6 +636,7 @@
             const [range, setRange]   = useState('session');   // session = 當盤、week = 本週
             const [pts, setPts]       = useState(null);
             const [vixPts, setVixPts] = useState(null);
+            const [tvWeek, setTvWeek] = useState(null);
             const [failed, setFailed] = useState(null);
             const [ready, setReady]   = useState(!!window.echarts);
             useEffect(() => { loadEcharts().then(() => setReady(true), e => setFailed(e.message)); }, []);
@@ -620,6 +645,7 @@
                     const { week } = slotAt(tpeNow());
                     fetchTrend(slotOpen(week, 0)).then(p => { setPts(p.filter(x => x.week === week)); setFailed(null); }, e => setFailed(e.message));
                     fetchVixWeek(week).then(setVixPts);
+                    fetchTvSeries(slotOpen(week, 0)).then(p => setTvWeek(p.filter(x => x.week === week)), () => {});
                 };
                 load();
                 const timer = setInterval(load, 120000);
@@ -631,7 +657,10 @@
                 return () => window.removeEventListener('keydown', onKey);
             }, [onClose]);
 
-            const source = metric === 'vix' ? vixPts : metric === 'tv' && tvPts && tvPts.length ? tvPts : pts;
+            // 時間價值：本週整段（只留現在這一期合約），最後補上頁首的最新值
+            const tvKeyNow = tvPts && tvPts.length ? tvKeyAt(tvPts[tvPts.length - 1].week, tvPts[tvPts.length - 1].t) : null;
+            const tvAll = tvWeek && tvKeyNow ? [...tvWeek.filter(p => tvKeyAt(p.week, p.t) === tvKeyNow && p.t < tvPts[tvPts.length - 1].t), tvPts[tvPts.length - 1]] : tvPts;
+            const source = metric === 'vix' ? vixPts : metric === 'tv' && tvAll && tvAll.length ? tvAll : pts;
             const last = source && source.length ? source[source.length - 1] : null;
             const rows = !last ? [] : range === 'week' ? source : source.filter(p => sessionKey(p) === sessionKey(last));
             const sub = !last ? '' : range === 'week' ? `本週 ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}` : `${SLOT_DEFS[last.slot].label} ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}`;
@@ -701,6 +730,18 @@
                 const timer = setInterval(load, 60000);
                 return () => clearInterval(timer);
             }, []);
+            // 頁首時間價值：上一盤開盤起的兩分鐘紀錄（2 分鐘抓一次）＋總表每 10 秒的最新中位數
+            const [tvHist, setTvHist]           = useState([]);
+            const [tvLive, setTvLive]           = useState(null);
+            useEffect(() => {
+                const load = () => {
+                    const { week, slot } = slotAt(tpeNow());
+                    fetchTvSeries(slotOpen(week, Math.max(0, slot - 1))).then(setTvHist, () => {});
+                };
+                load();
+                const timer = setInterval(load, 120000);
+                return () => clearInterval(timer);
+            }, []);
             const [trendKey, setTrendKey]       = useState(null);
             const closeTrend = useCallback(() => setTrendKey(null), []);
 
@@ -765,6 +806,11 @@
                         const originalData    = rawRows.slice(2, endIdx === -1 ? undefined : endIdx + 1);
                         const tvIdx = originalHeaders.findIndex(h => h.includes('時間價值'));
                         const fiIdx = originalHeaders.findIndex(h => h.includes('期貨指數'));
+                        const updIdx = originalHeaders.findIndex(h => h.includes('更新時間'));
+                        const now = tpeNow().getTime();
+                        const live = tvIdx === -1 || updIdx === -1 ? null
+                            : tvPick(now, originalData.filter(r => !String(r[0]).trim().startsWith('歐大總績效')).map(r => ({ name: r[0], upd: r[updIdx], tv: toNum(r[tvIdx]) })));
+                        setTvLive(live === null ? null : { t: now, tv: live, ...slotAt(new Date(now)) });
                         setTopStats({
                             timeValue:     tvIdx !== -1 ? (originalData[0] ? originalData[0][tvIdx] : '0.0') : '0.0'
                         });
@@ -1008,7 +1054,7 @@
 
             // 時間價值：這一期合約（週五 13:30 前看週五，之後看下週三），比上一盤收盤；上一盤是另一期合約就不比
             const nowT = tpeNow(), cur = slotAt(nowT), tvKey = tvKeyAt(cur.week, nowT.getTime());
-            const tvPts = tvSeries(demo, cur.week, tvKey);
+            const tvPts = [...tvHist.filter(p => !tvLive || p.t < tvLive.t), ...(tvLive ? [tvLive] : [])].filter(p => tvKeyAt(p.week, p.t) === tvKey);
             const tvLast = tvPts.length ? tvPts[tvPts.length - 1] : null;
             const tvPrevSlot = cur.slot > 0 && tvKeyAt(cur.week, wallMs(slotEnd(cur.week, cur.slot - 1))) === tvKey ? cur.slot - 1 : null;
             const tvPrevPt = tvPrevSlot === null ? null : tvPts.filter(p => p.week === cur.week && p.slot === tvPrevSlot).pop() || null;
