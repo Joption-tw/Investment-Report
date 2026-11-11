@@ -37,7 +37,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="common.js?v=20261109b"></script>
+    <script src="common.js?v=20261111a"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -916,8 +916,18 @@
             const [topStats, setTopStats]       = useState({ timeValue: '0.0' });
             const [fut, setFut]                 = useState(null);
             // 收完的盤 + 最新快照：給上面總表算「當盤獲利」、給下面每盤績效表用
-            const [sessions, setSessions]       = useState([]);
-            const [live, setLive]               = useState(null);
+            const [sessionsRaw, setSessions]    = useState([]);
+            const [liveRaw, setLive]            = useState(null);
+            // 歐大指定的出入金、改算到上一盤的差額（data/adjust.json）：每盤存檔和即時快照都先調整過再用
+            const [adj, setAdj]                 = useState([]);
+            useEffect(() => {
+                const load = () => fetchAdjust().then(setAdj, () => {});
+                load();
+                const timer = setInterval(load, 600000);
+                return () => clearInterval(timer);
+            }, []);
+            const sessions = useMemo(() => sessionsRaw.map(s => applyAdjust(s, adj)), [sessionsRaw, adj]);
+            const live     = useMemo(() => applyAdjust(liveRaw, adj), [liveRaw, adj]);
             // 頁首微型走勢（當盤）；trendKey = 目前放大的是哪一張圖
             const [trend, setTrend]             = useState([]);
             const [vixDay, setVixDay]           = useState([]);
@@ -1061,7 +1071,8 @@
                 if (baseline.pending) return { pending: true };
                 const b = name.startsWith('歐大總績效') ? baseline.total
                         : Object.entries(baseline.acc || {}).filter(([k]) => keyOfName(k) === keyOfName(name)).map(([, v]) => v)[0];
-                const cur = toNum(row[pnlIdx]);
+                const raw = toNum(row[pnlIdx]), nowMs = tpeNow().getTime();
+                const cur = raw === null ? null : name.startsWith('歐大總績效') ? raw - accountRowsFlows(nowMs).pnl : raw - flowsFor(adj, name, toNum(row[baseColIdx]), nowMs).pnl;
                 if (!b || b.pnl === null || cur === null) return null;
                 const pnl = cur - b.pnl;
                 return { pnl, rate: b.base ? pnl / b.base * 100 : null };
@@ -1109,8 +1120,16 @@
                 if (!prev || prev.pnl === null || Math.abs(base - prev.base) > 0.5) return null;
                 return { pnl: pnl - prev.pnl, base: prev.base + prev.pnl };
             };
+            // 出入金：獲利扣掉、初始金額加上（試算表起始資產改過就不再扣）
+            const shownOf = row => {
+                const name = String(row[0]).trim(), base = toNum(row[baseColIdx]), pnl = toNum(row[pnlIdx]);
+                if (pnlIdx === -1 || rateIdx === -1 || baseColIdx === -1 || base === null || pnl === null || name.startsWith('歐大總績效')) return null;
+                const f = flowsFor(adj, name, base, tpeNow().getTime()), c = carriedOf(row);
+                if (!c && !f.pnl) return null;
+                return { pnl: (c ? c.pnl : pnl) - f.pnl, base: (c ? c.base : base) + f.pnl, personal: f.personal };
+            };
             const shownRow = row => {
-                const c = carriedOf(row);
+                const c = shownOf(row);
                 if (!c) return row;
                 const out = [...row];
                 out[pnlIdx] = fmtWhole(c.pnl);
@@ -1123,6 +1142,10 @@
             const isTotalRow = row => String(row[0]).trim().startsWith('歐大總績效');
             const accountRows = data.filter(row => !isTotalRow(row));
             const weekCarried = accountRows.some(row => carriedOf(row));
+            function accountRowsFlows(nowMs) {
+                return data.filter(row => !isTotalRow(row)).map(row => baseColIdx === -1 ? { pnl: 0, personal: 0 } : flowsFor(adj, String(row[0]).trim(), toNum(row[baseColIdx]), nowMs))
+                           .reduce((s, f) => ({ pnl: s.pnl + f.pnl, personal: s.personal + f.personal }), { pnl: 0, personal: 0 });
+            }
             const totals = (() => {
                 const row = data.find(r => String(r[0]).trim() === '歐大總績效');
                 const ref = data.find(r => isTotalRow(r) && r !== row);
@@ -1131,13 +1154,14 @@
                 const col = name => headers.findIndex(h => h.includes(name));
                 const out = { row, personal: at(ref ? ref.findIndex(c => c.trim() === '個人獲利') : -1), group: at(pnlIdx), rate: at(rateIdx),
                               base: at(col('初始金額')), baseIdx: col('初始金額'), pts: at(col('總點數')), sess: sessText(sessOf(row)), sessRaw: sessOf(row) };
-                const t = prevWeekLast && prevWeekLast.total;
-                if (weekCarried && t && t.pnl !== null && toNum(out.group) !== null && toNum(out.base) !== null) {
-                    const group = toNum(out.group) - t.pnl, base = toNum(out.base) + t.pnl;
+                const t = weekCarried && prevWeekLast && prevWeekLast.total && prevWeekLast.total.pnl !== null ? prevWeekLast.total : null;
+                const f = accountRowsFlows(tpeNow().getTime());
+                if ((t || f.pnl) && toNum(out.group) !== null && toNum(out.base) !== null) {
+                    const group = toNum(out.group) - (t ? t.pnl : 0) - f.pnl, base = toNum(out.base) + (t ? t.pnl : 0) + f.pnl;
                     out.group = fmtWhole(group);
                     out.base = fmtWhole(base);
                     out.rate = base ? `${(group / base * 100).toFixed(2)}%` : '0.00%';
-                    if (t.personal !== null && t.personal !== undefined && toNum(out.personal) !== null) out.personal = fmtWhole(toNum(out.personal) - t.personal);
+                    if (toNum(out.personal) !== null) out.personal = fmtWhole(toNum(out.personal) - (t && t.personal !== null && t.personal !== undefined ? t.personal : 0) - f.personal);
                 }
                 return out;
             })();
@@ -1497,7 +1521,11 @@
                                                 });
                                                 const w = vals.filter(v => resultOf(v) === 'win').length, l = vals.filter(v => resultOf(v) === 'lose').length;
                                                 const lastAcc = sum.lastRow && sum.lastRow.state.accounts.find(a => a.name === name);
-                                                const calcVal = !sum.lastRow ? null : isTotal ? sum.lastRow.state.total.pnl : isPersonal ? sum.lastRow.state.total.personal : lastAcc ? lastAcc.pnl : null;
+                                                // 試算表起始資產還沒重設（週首接著上週累積）：本週累積改成這週每盤加總，不然會連上週一起算
+                                                const carriedWeek = rows.some(r => r.carried);
+                                                const calcVal = !sum.lastRow ? null
+                                                    : carriedWeek ? (vals.some(v => v !== undefined) ? vals.reduce((a, v) => a + (v || 0), 0) : null)
+                                                    : isTotal ? sum.lastRow.state.total.pnl : isPersonal ? sum.lastRow.state.total.personal : lastAcc ? lastAcc.pnl : null;
                                                 // 官方數字為主，跟推算不同時小字標推算
                                                 const offVal = !off ? undefined : isTotal ? off.total : isPersonal ? off.personal : off.acc[name];
                                                 const cumVal = offVal !== undefined ? offVal : calcVal;

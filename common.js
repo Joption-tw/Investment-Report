@@ -424,6 +424,50 @@ const fetchSessionOpen = async (week, slot) => {
     return open;
 };
 
+// ===== 手動調整（data/adjust.json，歐大指定）=====
+// flows：出入金 [{ name, at: 兩分鐘紀錄的記錄時間, amount }]：從那一筆起不算損益；試算表的起始資產改過（週三重設或手動調）就不再扣
+// moves：[{ name, at, session }]：那一筆跟前一筆的差額改算到 session（例：開盤才結算的差額算回上一盤）
+// 對個人獲利的影響不寫在檔案裡，打開頁面時從兩分鐘紀錄那一筆和前一筆的差按比例算
+const ADJUST_URL = 'data/adjust.json';
+const fetchAdjust = async () => {
+    const j = await fetch(`${ADJUST_URL}?t=${Date.now()}`).then(r => r.ok ? r.json() : null).catch(() => null);
+    const items = j ? [...(j.flows || []).map(f => ({ ...f, kind: 'flow' })), ...(j.moves || []).map(m => ({ ...m, kind: 'move' }))] : [];
+    if (!items.length) return [];
+    const cond = items.map(it => `(A >= '${stampOf(wallMs(it.at) - 6 * 60e3)}' and A <= '${stampOf(wallMs(it.at))}')`).join(' or ');
+    const url = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}&tq=${encodeURIComponent(`select * where ${cond}`)}`;
+    const text = await fetch(`${url}&t=${Date.now()}`).then(r => r.ok ? r.text() : '').catch(() => '');
+    const snaps = text ? parseLog(parseCSV(text)) : [];   // 新的在前
+    return items.map(it => {
+        const t = wallMs(it.at), k = snaps.findIndex(x => x.t === t), now = snaps[k], prev = snaps[k + 1];
+        const a1 = now && now.accounts.find(a => a.name === it.name), a0 = prev && prev.accounts.find(a => a.name === it.name);
+        if (!a1 || !a0 || a1.pnl === null || a0.pnl === null) return null;
+        const dP = a1.pnl - a0.pnl, dGroup = now.total.pnl - prev.total.pnl;
+        const dPers = now.total.personal !== null && prev.total.personal !== null ? now.total.personal - prev.total.personal : 0;
+        const pers = dGroup ? dPers * dP / dGroup : 0;   // 這一筆個人獲利的變動裡，這個帳號佔的部分
+        const pnl = it.kind === 'flow' ? it.amount : dP;
+        return { kind: it.kind, name: it.name, t, base: a1.base, session: it.session, pnl, personal: dP ? pers * pnl / dP : 0 };
+    }).filter(Boolean);
+};
+// 出入金：這個帳號、這個起始資產、這個時間以後的要扣掉多少
+const flowsFor = (adj, name, base, t) => (adj || []).filter(x => x.kind === 'flow' && x.name === cleanName(name) && x.base === base && t >= x.t)
+    .reduce((s, x) => ({ pnl: s.pnl + x.pnl, personal: s.personal + x.personal }), { pnl: 0, personal: 0 });
+const applyAdjust = (s, adj) => {
+    if (!s || !adj || !adj.length || !s.accounts) return s;
+    const t = s.t !== undefined ? s.t : wallMs(s.at);
+    let dTotal = 0, dPers = 0;
+    const accounts = s.accounts.map(a => {
+        if (a.pnl === null) return a;
+        const f = flowsFor(adj, a.name, a.base, t);
+        let pnl = a.pnl - f.pnl;
+        dTotal -= f.pnl; dPers -= f.personal;
+        adj.forEach(x => { if (x.kind === 'move' && x.name === cleanName(a.name) && s.id === x.session) { pnl += x.pnl; dTotal += x.pnl; dPers += x.personal; } });
+        return pnl === a.pnl ? a : { ...a, pnl };
+    });
+    if (!dTotal && !dPers) return s;
+    return { ...s, accounts, total: { ...s.total, pnl: s.total.pnl === null ? null : s.total.pnl + dTotal,
+                                      personal: s.total.personal === null || s.total.personal === undefined ? s.total.personal : s.total.personal + dPers } };
+};
+
 // 總表的「當盤獲利」：現在這一盤開盤前的累積獲利（基準），總表每 10 秒的累積獲利減掉它就是當盤
 // 回傳 { label, pending?, acc: { 帳號: { pnl: 基準, base: 起始資產 } }, total }；算不出來時沒有 acc
 const sessionBaseline = (sessions, live) => {
