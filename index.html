@@ -1090,17 +1090,56 @@
                 return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
             };
 
+            // 換週了（週三 15:00 起）但試算表的起始資產還沒重設（例：11/4 拖到 23:24 才重設）：
+            // 獲利金額、獲利率、初始金額先扣掉上週最後一盤收盤的累積獲利，畫面照樣從 0 起算；試算表重設後就直接用試算表的數字。
+            // 只改畫面上的數字，當盤獲利（sessOf）照舊用試算表原本的累積獲利算
+            const baseColIdx = headers.findIndex(h => h.includes('初始金額'));
+            // 上週最後一盤收盤，跟當盤獲利一樣用下一盤開盤前沒部位的值校正（收盤後結算的小差額）
+            const prevWeekLast = (() => {
+                const wk = slotAt(tpeNow()).week;
+                const first = sessions.find(x => x.week === wk && x.slot === 0) || (live && live.week === wk && live.slot === 0 ? live : null);
+                return settleClose(sessions.filter(x => x.week < wk).slice(-1)[0] || null, first);
+            })();
+            const fmtWhole = v => Math.round(v).toLocaleString();
+            const carriedOf = row => {
+                if (!prevWeekLast || pnlIdx === -1 || rateIdx === -1 || baseColIdx === -1) return null;
+                const name = String(row[0]).trim(), base = toNum(row[baseColIdx]), pnl = toNum(row[pnlIdx]);
+                if (base === null || pnl === null || name.startsWith('歐大總績效')) return null;
+                const prev = prevWeekLast.accounts.find(a => keyOfName(a.name) === keyOfName(name));
+                if (!prev || prev.pnl === null || Math.abs(base - prev.base) > 0.5) return null;
+                return { pnl: pnl - prev.pnl, base: prev.base + prev.pnl };
+            };
+            const shownRow = row => {
+                const c = carriedOf(row);
+                if (!c) return row;
+                const out = [...row];
+                out[pnlIdx] = fmtWhole(c.pnl);
+                out[rateIdx] = c.base ? `${(c.pnl / c.base * 100).toFixed(2)}%` : '0.00%';
+                out[baseColIdx] = fmtWhole(c.base);
+                return out;
+            };
+
             // 試算表最後兩列（歐大總績效）不是帳號，抽出來合成一條總績效列：個人獲利 + 眾人獲利
             const isTotalRow = row => String(row[0]).trim().startsWith('歐大總績效');
             const accountRows = data.filter(row => !isTotalRow(row));
+            const weekCarried = accountRows.some(row => carriedOf(row));
             const totals = (() => {
                 const row = data.find(r => String(r[0]).trim() === '歐大總績效');
                 const ref = data.find(r => isTotalRow(r) && r !== row);
                 if (!row || pnlIdx === -1) return null;
                 const at = i => (i === -1 ? '' : row[i] || '');
                 const col = name => headers.findIndex(h => h.includes(name));
-                return { row, personal: at(ref ? ref.findIndex(c => c.trim() === '個人獲利') : -1), group: at(pnlIdx), rate: at(rateIdx),
-                         base: at(col('初始金額')), baseIdx: col('初始金額'), pts: at(col('總點數')), sess: sessText(sessOf(row)), sessRaw: sessOf(row) };
+                const out = { row, personal: at(ref ? ref.findIndex(c => c.trim() === '個人獲利') : -1), group: at(pnlIdx), rate: at(rateIdx),
+                              base: at(col('初始金額')), baseIdx: col('初始金額'), pts: at(col('總點數')), sess: sessText(sessOf(row)), sessRaw: sessOf(row) };
+                const t = prevWeekLast && prevWeekLast.total;
+                if (weekCarried && t && t.pnl !== null && toNum(out.group) !== null && toNum(out.base) !== null) {
+                    const group = toNum(out.group) - t.pnl, base = toNum(out.base) + t.pnl;
+                    out.group = fmtWhole(group);
+                    out.base = fmtWhole(base);
+                    out.rate = base ? `${(group / base * 100).toFixed(2)}%` : '0.00%';
+                    if (t.personal !== null && t.personal !== undefined && toNum(out.personal) !== null) out.personal = fmtWhole(toNum(out.personal) - t.personal);
+                }
+                return out;
             })();
             // 深色底上的損益字色：紅 = 賺、綠 = 賠
             const darkTone = v => { const n = toNum(v); return n > 0 ? 'text-red-400' : n < 0 ? 'text-emerald-400' : 'text-slate-300'; };
@@ -1148,13 +1187,14 @@
             };
 
             const renderDesktopRows = () => accountRows.map((row, rIdx) => {
-                const cells = row.flatMap((cell, cIdx) => cIdx === sessCol ? [renderCell(cell, cIdx), ...sessCells(row)] : [renderCell(cell, cIdx)]);
+                const cells = shownRow(row).flatMap((cell, cIdx) => cIdx === sessCol ? [renderCell(cell, cIdx), ...sessCells(row)] : [renderCell(cell, cIdx)]);
                 return html`<tr key=${rIdx} className="hover:bg-slate-50 transition-colors">${cells}</tr>`;
             });
 
             const renderMobileCards = () => accountRows.map((row, rIdx) => {
+                const shown = shownRow(row);
                 const cardRows = headers.slice(1).map((h, i) => {
-                    const cell = row[i + 1];
+                    const cell = shown[i + 1];
                     const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass } = getCellStyle(h, cell);
                     let highlightClass = "";
                     let textClass = isNeg ? "text-red-500" : "text-slate-800";
