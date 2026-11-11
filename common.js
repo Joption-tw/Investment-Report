@@ -425,7 +425,9 @@ const fetchSessionOpen = async (week, slot) => {
 };
 
 // ===== 手動調整（data/adjust.json，歐大指定）=====
-// flows：出入金 [{ name, at: 兩分鐘紀錄的記錄時間, amount }]：從那一筆起不算損益；試算表的起始資產改過（週三重設或手動調）就不再扣
+// flows：出入金 [{ name, at: 兩分鐘紀錄的記錄時間, amount }]：從那一筆起不算損益；
+//        之後試算表的起始資產有改過（週三重設或手動調，看全部帳號起始資產合計）就已經吸收了，不再扣
+//        （例：示範帳號入金補回 100 萬，週三重設時起始資產還是 100 萬，只看這個帳號會以為沒重設）
 // moves：[{ name, at, session }]：那一筆跟前一筆的差額改算到 session（例：開盤才結算的差額算回上一盤）
 // 對個人獲利的影響不寫在檔案裡，打開頁面時從兩分鐘紀錄那一筆和前一筆的差按比例算
 const ADJUST_URL = 'data/adjust.json';
@@ -445,19 +447,21 @@ const fetchAdjust = async () => {
         const dPers = now.total.personal !== null && prev.total.personal !== null ? now.total.personal - prev.total.personal : 0;
         const pers = dGroup ? dPers * dP / dGroup : 0;   // 這一筆個人獲利的變動裡，這個帳號佔的部分
         const pnl = it.kind === 'flow' ? it.amount : dP;
-        return { kind: it.kind, name: it.name, t, base: a1.base, session: it.session, pnl, personal: dP ? pers * pnl / dP : 0 };
+        return { kind: it.kind, name: it.name, t, base: a1.base, baseSum: baseSumOf(now.accounts), session: it.session, pnl, personal: dP ? pers * pnl / dP : 0 };
     }).filter(Boolean);
 };
-// 出入金：這個帳號、這個起始資產、這個時間以後的要扣掉多少
-const flowsFor = (adj, name, base, t) => (adj || []).filter(x => x.kind === 'flow' && x.name === cleanName(name) && x.base === base && t >= x.t)
+// 出入金：這個帳號、這個起始資產（和全部帳號起始資產合計）、這個時間以後的要扣掉多少
+const baseSumOf = accounts => accounts.reduce((s, a) => s + (a.base || 0), 0);
+const flowsFor = (adj, name, base, t, baseSum) => (adj || []).filter(x => x.kind === 'flow' && x.name === cleanName(name) && x.base === base && t >= x.t
+                                                                     && (baseSum === undefined || Math.abs(baseSum - x.baseSum) < 1))
     .reduce((s, x) => ({ pnl: s.pnl + x.pnl, personal: s.personal + x.personal }), { pnl: 0, personal: 0 });
 const applyAdjust = (s, adj) => {
     if (!s || !adj || !adj.length || !s.accounts) return s;
-    const t = s.t !== undefined ? s.t : wallMs(s.at);
+    const t = s.t !== undefined ? s.t : wallMs(s.at), sum = baseSumOf(s.accounts);
     let dTotal = 0, dPers = 0;
     const accounts = s.accounts.map(a => {
         if (a.pnl === null) return a;
-        const f = flowsFor(adj, a.name, a.base, t);
+        const f = flowsFor(adj, a.name, a.base, t, sum);
         let pnl = a.pnl - f.pnl;
         dTotal -= f.pnl; dPers -= f.personal;
         adj.forEach(x => { if (x.kind === 'move' && x.name === cleanName(a.name) && s.id === x.session) { pnl += x.pnl; dTotal += x.pnl; dPers += x.personal; } });
