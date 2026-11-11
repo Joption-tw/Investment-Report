@@ -607,6 +607,8 @@ const DAILY = {
   '20261030': [46, 23, 23, 5997, 5830, 37.95, 110468.29, 110597.34, ''],
   '20261102': [67, 37, 37, 9101, 9321, 61.05, 110597.34, 110316.29, ''],
   '20261106': [43, 26, 26, 7788, 7459, 42.9, 110316.29, 110602.39, ''],
+  '20261109': [29, 16, 16, 6045, 5799, 26.4, 110602.39, 110821.99, ''],
+  '20261110': [17, 12, 12, 3829, 3722, 19.8, 110821.99, 110909.19, ''],
 };
 // 當天盤中（09:15~15:05）券商回報的「占用保證金」最大值：'年月日': [最大保證金, 當時總資金, 時間]；使用% = 最大保證金 ÷ 當時總資金
 const DAILY_MARGIN = {
@@ -628,6 +630,8 @@ const DAILY_MARGIN = {
   '20261030': [85260.54, 116465.29, '09:47'],
   '20261102': [109953.80, 117672.34, '10:02'],
   '20261106': [98835.60, 118104.29, '10:23'],
+  '20261109': [66651.70, 115814.39, '09:38'],
+  '20261110': [52319.94, 114353.99, '11:29'],
 };
 // 當日淨損益（以帳戶為準）= 14:57~15:00 的平均帳戶總市值 − 09:30~09:33 的平均帳戶總市值；要先載入檔案才算得出來
 // 盤中（14:57~15:00 還沒有資料）改用最新一筆帳戶總市值 − 09:30~09:33 平均，live = true；上面 PNL 的成交明細只當參考，顯示在分時圖彈窗裡
@@ -688,7 +692,8 @@ function liveToday() {
     close = mv[i]; at = D.rows[i].hm;
     if (av && av[i] !== null && (estM === null || mv[i] - av[i] > estM)) { estM = mv[i] - av[i]; estT = D.rows[i].hm; estTot = mv[i]; }
   }
-  if (la && (close === null || la.at > at)) { close = la.total; at = la.at; }     // 券商回報比較新就用券商總資金
+  // 券商「總資金」含還沒買回的賣方權利金（現金先收），有未平倉時不能當損益；只在沒有帳戶總市值、或已全部平倉時才用
+  if (la && la.sellLots === la.buyLots && (close === null || la.at > at)) { close = la.total; at = la.at; }
   if (close === null) return null;
   const prev = Object.keys(DAILY).filter(k => k < key).sort().pop();
   let start = la ? la.start : prev ? DAILY[prev][7] : null, base = '日初資金（券商）';
@@ -697,7 +702,7 @@ function liveToday() {
   const r = { key, md: key.slice(4), start, close, at, live: at < '15:00', sum, pct: sum / start * 100,
               maxM: estM, maxT: estT, maxPct: estM != null && estTot ? estM / estTot * 100 : null, maxEst: true,
               how: `最新 ${at} 帳戶總市值 ${fmtMoney(close)} − ${base} ${fmtMoney(start)}；獲利% ＝ 淨損益 ÷ 日初資金` };
-  if (la) Object.assign(r, { fills: la.fills, sellLots: la.sellLots, buyLots: la.buyLots, prem: la.pin - la.pout, fee: la.fee,
+  if (la) Object.assign(r, { fills: la.fills, sellLots: la.sellLots, buyLots: la.buyLots, prem: la.pin - la.pout, pin: la.pin, pout: la.pout, fee: la.fee,
                              maxM: la.maxM, maxT: la.maxT, maxPct: la.maxM != null && la.maxTot ? la.maxM / la.maxTot * 100 : null, maxEst: false });
   return r;
 }
@@ -1287,7 +1292,10 @@ function buildDailyTable() {
     const wd = WD[new Date(+L.key.slice(0, 4), +L.key.slice(4, 6) - 1, +L.key.slice(6)).getDay()];
     const liveRow = `<tr class="live"><td>${md(L.key)}<small>${L.live ? `盤中 ${L.at}` : '收盤，待補券商數字'}</small></td><td>${wd}</td><td>${L.fills ?? '--'}</td><td>${L.fills != null ? `${L.sellLots} / ${L.buyLots}` : '--'}</td>` +
       (L.maxM != null ? `<td>${m2(L.maxM)}<small>${L.maxT}${L.maxEst ? ' 估' : ''}</small></td><td class="${L.maxPct >= 90 ? 'mhi' : ''}">${L.maxPct.toFixed(1)}%</td>` : '<td>--</td><td>--</td>') +
-      (L.prem != null ? `<td class="${pc(L.prem)}">${sgn(L.prem)}${L.sellLots !== L.buyLots ? `<small title="還沒買回的口數：這部分權利金是先收的現金，不是獲利">（含未平倉 ${Math.abs(L.sellLots - L.buyLots)} 口）</small>` : ''}</td><td>${m2(L.fee)}</td>` : '<td>--</td><td>--</td>') +
+      // 有未平倉時：權利金淨收用「淨損益 + 手續費」（未平倉按市價算，跟其他天一樣 權利金淨收 − 手續費 = 淨損益）；先收的現金放在滑鼠提示
+      (L.prem != null ? (L.sellLots !== L.buyLots
+        ? (v => `<td class="${pc(v)}" title="未平倉 ${Math.abs(L.sellLots - L.buyLots)} 口按市價計算&#10;實際已收現金：賣出 ${m2(L.pin)} − 買回 ${m2(L.pout)} = ${sgn(L.prem)}（還沒買回，不是獲利）">${sgn(v)}<small>（未平倉 ${Math.abs(L.sellLots - L.buyLots)} 口按市價）</small></td>`)(Math.round((L.sum + L.fee) * 100) / 100)
+        : `<td class="${pc(L.prem)}">${sgn(L.prem)}</td>`) + `<td>${m2(L.fee)}</td>` : '<td>--</td><td>--</td>') +
       `<td class="${pc(L.sum)}" title="${L.how}">${sgn(L.sum)}</td><td>${m2(L.start)}</td><td class="${pc(L.sum)}">${fmtPct(L.pct)}</td></tr>`;
     $('dailyBody').innerHTML = $('dailyBody').innerHTML.replace('<tr class="sum">', liveRow + '<tr class="sum">');
   }
