@@ -97,6 +97,21 @@
         .tr-tab[aria-pressed="true"] { background: #0f172a; color: #fff; }
         .tr-close { min-height: 36px; margin-left: auto; padding: 0 14px; border-radius: 8px; background: #f1f5f9; color: #334155; font-size: 14px; font-weight: 800; cursor: pointer; }
         .tr-close:hover { background: #e2e8f0; }
+        .tr-eraser { min-height: 36px; margin-left: auto; padding: 0 14px; border-radius: 999px; border: 2px solid #f9a8d4; background: #fff; color: #db2777; font-size: 14px; font-weight: 900; cursor: pointer; }
+        .tr-eraser.on { background: #db2777; border-color: #db2777; color: #fff; }
+        .tr-eraser + .tr-close { margin-left: 0; }
+        .tr-erase-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 18px; border-bottom: 1px solid #e2e8f0; background: #fdf2f8; font-size: 13px; font-weight: 800; }
+        .tr-erase-form { display: inline-flex; gap: 6px; }
+        .tr-erase-form input { width: 140px; padding: 5px 12px; border: 2px solid #f9a8d4; border-radius: 999px; font-size: 13px; font-weight: 700; outline: none; }
+        .tr-erase-form input:focus { border-color: #db2777; }
+        .tr-erase-form button { padding: 5px 14px; border-radius: 999px; background: #db2777; color: #fff; font-weight: 900; cursor: pointer; }
+        .tr-erase-tip { color: #db2777; }
+        .tr-erase-btn { padding: 5px 12px; border-radius: 999px; background: #fff; color: #475569; border: 1px solid #e2e8f0; font-weight: 900; cursor: pointer; }
+        .tr-erase-msg { color: #64748b; }
+        html.m-portrait .tr-eraser { min-height: 84px; padding: 0 28px; font-size: 34px; }
+        html.m-portrait .tr-erase-bar { font-size: 28px; gap: 14px; padding: 16px 24px; }
+        html.m-portrait .tr-erase-form input { width: 300px; font-size: 28px; padding: 10px 20px; }
+        html.m-portrait .tr-erase-form button, html.m-portrait .tr-erase-btn { font-size: 28px; padding: 10px 24px; }
         .tr-chart { position: relative; flex: 1 1 auto; min-height: 0; height: min(62vh, 560px); }
         .tr-chart > div { width: 100%; height: 100%; }
         .tr-legs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 16px 14px; border-top: 1px solid #e2e8f0; font-size: 13px; font-weight: 800; }
@@ -349,7 +364,7 @@
             window.scrollTo(0, 0);
         }
 
-        const { useState, useEffect, useCallback, useRef } = React;
+        const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
         const VERSION  = "V2.2 優化版";
         const SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
@@ -597,8 +612,44 @@
                 </span>`;
         };
 
-        const TrendChart = ({ rows, metric, showSessions }) => {
-            const ref = useRef(null), chart = useRef(null);
+        // ===== 走勢圖橡皮擦：跟帳號頁同一個密碼、同一個「塗掉紀錄」分頁，帳號記成「走勢圖」，不影響帳號頁 =====
+        // 期指記在 fut 線，時間價值記在 ba（週三）/ bb（週五）線；VIX 的線名 Apps Script 還不收，先不開放
+        const ERASE_KEY_STORE = 'ir-erase-key';
+        const getEraseKey = () => { try { return localStorage.getItem(ERASE_KEY_STORE) || ''; } catch (e) { return ''; } };
+        const setEraseKeyStore = v => { try { v ? localStorage.setItem(ERASE_KEY_STORE, v) : localStorage.removeItem(ERASE_KEY_STORE); } catch (e) {} };
+        const TREND_ERASE_ACC = '走勢圖';
+        const trendEraseItem = (metric, p) => {
+            const line = metric === 'fut' ? 'fut' : metric === 'tv' ? tvKeyAt(p.week, p.t) : null;
+            return line ? { account: TREND_ERASE_ACC, line, t: stampOf(p.t) } : null;
+        };
+        const isTrendErased = (erased, metric, p) => { const it = trendEraseItem(metric, p); return !!it && erased.has(eraseKey(it.account, it.line, it.t)); };
+        // 塗掉紀錄：打開頁面讀一次、之後 2 分鐘一次；這頁塗掉 / 還原的先記在本機，等試算表跟上
+        const useErased = () => {
+            const [logged, setLogged] = useState(() => new Set());
+            const [local, setLocal]   = useState(() => new Map());
+            useEffect(() => {
+                const load = () => fetch(`${ERASE_LOG_URL}&t=${Date.now()}`).then(r => r.ok ? r.text() : '').then(t => t && setLogged(parseErasures(parseCSV(t))), () => {});
+                load();
+                const timer = setInterval(load, 120000);
+                return () => clearInterval(timer);
+            }, []);
+            const erased = useMemo(() => {
+                const all = new Set(logged);
+                local.forEach((v, k) => v ? all.add(k) : all.delete(k));
+                return all;
+            }, [logged, local]);
+            const mark = useCallback((items, value) => setLocal(prev => {
+                const m = new Map(prev);
+                items.forEach(it => m.set(eraseKey(it.account, it.line, it.t), value));
+                return m;
+            }), []);
+            return [erased, mark];
+        };
+
+        const TrendChart = ({ rows, metric, showSessions, eraser, onErase, onEraseEnd }) => {
+            const ref = useRef(null), chart = useRef(null), drawn = useRef([]);
+            const live = useRef({});
+            live.current = { eraser, onErase, onEraseEnd, metric };
             const m = TREND_METRICS[metric];
             // 手機轉向時重畫（直向、橫向的字級和邊界不同）
             const [turned, setTurned] = useState(0);
@@ -607,6 +658,23 @@
                 const onResize = () => c.resize();
                 const portrait = matchMedia('(orientation: portrait)');
                 const onTurn = () => setTurned(n => n + 1);
+                // 橡皮擦開著時：按住拖曳，游標 12px（手機 28px）內的點都塗掉，放開時送出
+                let painting = false;
+                const eraseAt = (x, y) => {
+                    const R = document.documentElement.classList.contains('m-portrait') ? 28 : 12, found = [];
+                    drawn.current.forEach((p, i) => {
+                        if (!p || p.t === null || p[live.current.metric] === null || p[live.current.metric] === undefined) return;
+                        const [px, py] = c.convertToPixel({ seriesIndex: 0 }, [i, p[live.current.metric]]);
+                        if (Math.hypot(px - x, py - y) <= R) found.push(p);
+                    });
+                    if (found.length) live.current.onErase(found);
+                };
+                const zr = c.getZr();
+                zr.on('mousedown', e => { if (!live.current.eraser) return; painting = true; eraseAt(e.offsetX, e.offsetY); });
+                zr.on('mousemove', e => { if (painting) eraseAt(e.offsetX, e.offsetY); });
+                const end = () => { if (painting) { painting = false; live.current.onEraseEnd(); } };
+                zr.on('mouseup', end);
+                zr.on('globalout', end);
                 window.addEventListener('resize', onResize);
                 portrait.addEventListener('change', onTurn);
                 return () => { window.removeEventListener('resize', onResize); portrait.removeEventListener('change', onTurn); c.dispose(); };
@@ -625,6 +693,7 @@
                     else if (newSession || hhmm(prev.t).slice(0, 2) !== hhmm(p.t).slice(0, 2)) labels[line.length] = hhmm(p.t);
                     line.push(p);
                 });
+                drawn.current = line;
                 const vals = line.map(p => p[metric]);
                 const turns = findTurns(vals, TURNS_MAX[showSessions ? 'week' : 'session']);
                 const turnPoint = t => ({ coord: [t.i, vals[t.i]], value: vals[t.i], symbolSize: mPortrait ? 12 : 6, itemStyle: { color: t.hi ? '#ef4444' : '#10b981' },
@@ -642,7 +711,7 @@
                     grid: mPortrait ? { left: 112, right: 40, top: 64, bottom: showSessions ? 96 : 60 }
                         : mLandscape ? { left: 48, right: 14, top: 18, bottom: showSessions ? 32 : 20 }
                         : { left: 62, right: 24, top: 30, bottom: showSessions ? 46 : 30 },
-                    tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, confine: true, textStyle: { fontSize: mPortrait ? 30 : 14 },
+                    tooltip: { show: !eraser, trigger: 'axis', axisPointer: { type: 'line' }, confine: true, textStyle: { fontSize: mPortrait ? 30 : 14 },
                         formatter: ps => {
                             const p = ps[0] && line[ps[0].dataIndex];
                             return p && p.t !== null ? `<b>${mdhm(p.t)}</b> ${SLOT_DEFS[p.slot].label}<br>${ps[0].marker}${m.label}：<b>${fmtTrend(p[metric], m.d)}</b>` : '';
@@ -660,11 +729,11 @@
                                      data: [...turns.slice(1).map(legPoint), ...turns.map(turnPoint)] } }]
                 }, true);
                 chart.current.resize();
-            }, [rows, metric, showSessions, turned]);
-            return html`<div ref=${ref}></div>`;
+            }, [rows, metric, showSessions, turned, eraser]);
+            return html`<div ref=${ref} style=${eraser ? { cursor: 'crosshair', touchAction: 'none' } : undefined}></div>`;
         };
 
-        const TrendModal = ({ initial, current, tvPts, onClose }) => {
+        const TrendModal = ({ initial, current, tvPts, onClose, erased, markErased }) => {
             const [metric, setMetric] = useState(initial);
             const [range, setRange]   = useState('session');   // session = 當盤、week = 本週
             const [pts, setPts]       = useState(null);
@@ -693,7 +762,8 @@
             // 時間價值：本週整段（只留現在這一期合約），最後補上頁首的最新值
             const tvKeyNow = tvPts && tvPts.length ? tvKeyAt(tvPts[tvPts.length - 1].week, tvPts[tvPts.length - 1].t) : null;
             const tvAll = tvWeek && tvKeyNow ? [...tvWeek.filter(p => tvKeyAt(p.week, p.t) === tvKeyNow && p.t < tvPts[tvPts.length - 1].t), tvPts[tvPts.length - 1]] : tvPts;
-            const source = metric === 'vix' ? vixPts : metric === 'tv' && tvAll && tvAll.length ? tvAll : pts;
+            const rawSource = metric === 'vix' ? vixPts : metric === 'tv' && tvAll && tvAll.length ? tvAll : pts;
+            const source = rawSource && rawSource.filter(p => !isTrendErased(erased, metric, p));
             const last = source && source.length ? source[source.length - 1] : null;
             const rows = !last ? [] : range === 'week' ? source : source.filter(p => sessionKey(p) === sessionKey(last));
             const sub = !last ? '' : range === 'week' ? `本週 ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}` : `${SLOT_DEFS[last.slot].label} ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}`;
@@ -709,6 +779,75 @@
             const legFmt = v => fmtLeg(v, d);
             const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
 
+            // 橡皮擦：輸入過密碼的瀏覽器才看得到（第一次用 ?edit=1 打開）
+            const canErase = metric !== 'vix' && (!!getEraseKey() || new URLSearchParams(location.search).get('edit') === '1');
+            const [eraser, setEraser]       = useState(false);
+            const [askKey, setAskKey]       = useState(false);
+            const [keyInput, setKeyInput]   = useState('');
+            const [eraseMsg, setEraseMsg]   = useState('');
+            const [undoStack, setUndoStack] = useState([]);
+            const batch = useRef(new Map());
+            useEffect(() => { if (metric === 'vix') setEraser(false); }, [metric]);
+            const postErase = async (items, action) => {
+                try {
+                    const r = await fetch(ERASE_API, { method: 'POST', body: JSON.stringify({ key: getEraseKey(), items: items.map(it => ({ ...it, action })) }) });
+                    const j = await r.json();
+                    if (!j.ok) {
+                        if (j.error === '密碼錯誤') { setEraseKeyStore(''); setEraser(false); }
+                        setEraseMsg(`沒有存到：${j.error}`); return;
+                    }
+                    setEraseMsg(`${action === 'erase' ? '已塗掉' : '已還原'} ${items.length} 點`);
+                } catch (e) { setEraseMsg('沒有存到：連線失敗，請再試一次'); }
+            };
+            const onErase = found => {
+                const add = [];
+                found.forEach(p => {
+                    const it = trendEraseItem(metric, p);
+                    if (!it) return;
+                    const k = eraseKey(it.account, it.line, it.t);
+                    if (!batch.current.has(k)) { batch.current.set(k, it); add.push(it); }
+                });
+                if (add.length) markErased(add, true);
+            };
+            const onEraseEnd = () => {
+                const items = [...batch.current.values()];
+                batch.current = new Map();
+                if (!items.length) return;
+                setUndoStack(st => [...st, items]);
+                postErase(items, 'erase');
+            };
+            const undo = () => {
+                const items = undoStack[undoStack.length - 1];
+                if (!items) return;
+                setUndoStack(st => st.slice(0, -1));
+                markErased(items, false);
+                postErase(items, 'restore');
+            };
+            // 這張圖（這個指標、畫面上這段時間）塗掉的點
+            const erasedHere = !rawSource || !rows.length ? [] : rawSource
+                .filter(p => p.t >= rows[0].t && p.t <= rows[rows.length - 1].t && isTrendErased(erased, metric, p))
+                .map(p => trendEraseItem(metric, p));
+            const restoreAll = () => { markErased(erasedHere, false); postErase(erasedHere, 'restore'); };
+            const toggleEraser = () => {
+                if (eraser) { setEraser(false); return; }
+                if (!getEraseKey()) { setAskKey(v => !v); setEraseMsg(''); return; }
+                setEraser(true);
+                setEraseMsg('');
+            };
+            const submitKey = async e => {
+                e.preventDefault();
+                const key = keyInput.trim();
+                if (!key) return;
+                setEraseMsg('確認密碼中…');
+                const r = await fetch(ERASE_API, { method: 'POST', body: JSON.stringify({ key, check: true }) }).then(x => x.json()).catch(() => null);
+                if (!r || !r.ok) { setEraseMsg(r ? '密碼錯誤' : '連線失敗，請再試一次'); return; }
+                setEraseKeyStore(key);
+                setKeyInput('');
+                setAskKey(false);
+                setEraser(true);
+                setEraseMsg('');
+            };
+
             return ReactDOM.createPortal(html`
                 <div className="tr-back" onClick=${e => { if (e.target === e.currentTarget) onClose(); }}>
                     <div className="tr-panel" role="dialog" aria-modal="true" aria-label=${`${TREND_METRICS[metric].label}走勢圖`}>
@@ -721,10 +860,24 @@
                         <div className="tr-controls">
                             <div className="tr-group">${Object.keys(TREND_METRICS).map(k => tab(metric === k, TREND_METRICS[k].label, () => setMetric(k)))}</div>
                             <div className="tr-group">${tab(range === 'session', '當盤', () => setRange('session'))}${tab(range === 'week', '本週', () => setRange('week'))}</div>
+                            ${canErase && html`<button type="button" className=${'tr-eraser' + (eraser ? ' on' : '')} onClick=${toggleEraser}>🧽 ${eraser ? '橡皮擦開啟中' : '橡皮擦'}</button>`}
                             <button type="button" className="tr-close" onClick=${onClose}>✕ 關閉</button>
                         </div>
+                        ${canErase && (askKey && !eraser || eraser || undoStack.length > 0 || erasedHere.length > 0 || eraseMsg) && html`
+                            <div className="tr-erase-bar">
+                                ${askKey && !eraser && html`
+                                    <form onSubmit=${submitKey} className="tr-erase-form">
+                                        <input type="password" autoFocus value=${keyInput} onInput=${e => setKeyInput(e.target.value)} placeholder="橡皮擦密碼" />
+                                        <button type="submit">確定</button>
+                                    </form>`}
+                                ${eraser && html`<span className="tr-erase-tip">在圖上按住拖曳，把不合理的點塗掉；再按一次橡皮擦關閉</span>`}
+                                ${undoStack.length > 0 && html`<button type="button" className="tr-erase-btn" onClick=${undo}>↶ 復原上一次</button>`}
+                                ${erasedHere.length > 0 && html`<button type="button" className="tr-erase-btn" onClick=${restoreAll}>還原這段塗掉的 ${erasedHere.length} 點</button>`}
+                                ${eraseMsg && html`<span className="tr-erase-msg">${eraseMsg}</span>`}
+                            </div>`}
                         <div className="tr-chart">
-                            ${msg ? html`<div className="tr-msg">${msg}</div>` : html`<${TrendChart} rows=${rows} metric=${metric} showSessions=${range === 'week'} />`}
+                            ${msg ? html`<div className="tr-msg">${msg}</div>` : html`<${TrendChart} rows=${rows} metric=${metric} showSessions=${range === 'week'}
+                                                                                              eraser=${eraser} onErase=${onErase} onEraseEnd=${onEraseEnd} />`}
                         </div>
                         ${legs.length > 0 && html`
                             <div className="tr-legs">
@@ -791,6 +944,7 @@
                 return () => clearInterval(timer);
             }, []);
             const [trendKey, setTrendKey]       = useState(null);
+            const [erased, markErased]          = useErased();
             const closeTrend = useCallback(() => setTrendKey(null), []);
 
             useEffect(() => {
@@ -1102,7 +1256,7 @@
 
             // 時間價值：這一期合約（週五 13:30 前看週五，之後看下週三），比上一盤收盤；上一盤是另一期合約就不比
             const nowT = tpeNow(), cur = slotAt(nowT), tvKey = tvKeyAt(cur.week, nowT.getTime());
-            const tvPts = [...tvHist.filter(p => !tvLive || p.t < tvLive.t), ...(tvLive ? [tvLive] : [])].filter(p => tvKeyAt(p.week, p.t) === tvKey);
+            const tvPts = [...tvHist.filter(p => !tvLive || p.t < tvLive.t), ...(tvLive ? [tvLive] : [])].filter(p => tvKeyAt(p.week, p.t) === tvKey && !isTrendErased(erased, 'tv', p));
             const tvLast = tvPts.length ? tvPts[tvPts.length - 1] : null;
             const tvPrevSlot = cur.slot > 0 && tvKeyAt(cur.week, wallMs(slotEnd(cur.week, cur.slot - 1))) === tvKey ? cur.slot - 1 : null;
             const tvPrevPt = tvPrevSlot === null ? null : tvPts.filter(p => p.week === cur.week && p.slot === tvPrevSlot).pop() || null;
@@ -1144,7 +1298,7 @@
             const statCells = html`
                 ${trendCell('tv', tvValue, 'hl-tv', { label: tvLast ? html`時間價值<span className="hl-label-x"> · ${mdLabel(tvSettleDay)}週${WEEKDAY[new Date(tvSettleDay).getUTCDay()]} · ${tvLeft}</span>` : '時間價值',
                     values: tvPts.filter(p => p.week === cur.week && p.slot === cur.slot).map(p => p.tv), subs: tvSubs })}
-                ${trendCell('fut', futValue, 'hl-fut' + futStale, { label: futMonth ? `台指期 ${+futMonth} 月` : '台指期', values: trend.map(p => p.fut), subs: futSubs,
+                ${trendCell('fut', futValue, 'hl-fut' + futStale, { label: futMonth ? `台指期 ${+futMonth} 月` : '台指期', values: trend.filter(p => !isTrendErased(erased, 'fut', p)).map(p => p.fut), subs: futSubs,
                     cls: pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '',
                     extra: html`<span className=${"hl-chg font-mono-data" + futStale}><span className="hl-pts">${pointsChangeFormatted}</span><span className="hl-pct">(${percentChange})</span></span>` })}
                 ${trendCell('vix', vixValue, 'hl-vix', { values: vixDay.map(p => p.vix), subs: vixSubs })}`;
@@ -1207,7 +1361,7 @@
                     </main>
                     <${SessionPanel} sessions=${sessions} live=${live} liveMarket=${(demo && demo.market) || {}} />
                     <button type="button" id="trend-btn" onClick=${() => setTrendKey('tv')}>走勢圖</button>
-                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: tvValue, fut: futValue, vix: vixValue }} tvPts=${tvPts} onClose=${closeTrend} />`}
+                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: tvValue, fut: futValue, vix: vixValue }} tvPts=${tvPts} onClose=${closeTrend} erased=${erased} markErased=${markErased} />`}
                 </div>`;
         };
 
