@@ -432,14 +432,14 @@
             const [loading, setLoading]   = useState(true);
             const [copied, setCopied]     = useState(false);
 
-            // 橡皮擦：塗掉的點 = 試算表「塗掉紀錄」（隱藏分頁）＋這次在頁面上塗 / 還原的；只有輸入過密碼的瀏覽器看得到橡皮擦（第一次用 &edit=1 打開）
+            // 橡皮擦：塗掉的點 = 試算表「塗掉紀錄」（隱藏分頁）＋這次在頁面上塗 / 還原的；按鈕一直顯示，沒輸入過密碼的瀏覽器按下去會先要密碼
             // 一般人看到的圖不會有任何塗掉的痕跡：塗掉的點直接不畫，前後兩點連起來
             const [erased, setErased]       = useState(() => new Set());
             const [overrides, setOverrides] = useState(() => new Map());
             const [eraser, setEraser]       = useState(false);
             const [undoStack, setUndoStack] = useState([]);
             const [eraseMsg, setEraseMsg]   = useState('');
-            const canErase = !!getEraseKey() || params.get('edit') === '1';
+            const canErase = true;
             const batch = useRef(new Map());
             const itemOf = (def, t) => ({ account: def.src === 'demo' ? '*' : name, line: def.key, t: stampOf(t) });
             const keyOf = it => eraseKey(it.account, it.line, it.t);

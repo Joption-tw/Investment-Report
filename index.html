@@ -779,8 +779,8 @@
             const legFmt = v => fmtLeg(v, d);
             const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
 
-            // 橡皮擦：輸入過密碼的瀏覽器才看得到（第一次用 ?edit=1 打開）
-            const canErase = metric !== 'vix' && (!!getEraseKey() || new URLSearchParams(location.search).get('edit') === '1');
+            // 橡皮擦：按鈕一直顯示，沒輸入過密碼的瀏覽器按下去會先要密碼
+            const canErase = metric !== 'vix';
             const [eraser, setEraser]       = useState(false);
             const [askKey, setAskKey]       = useState(false);
             const [keyInput, setKeyInput]   = useState('');
