@@ -58,7 +58,7 @@ const VIX_URL      = 'https://demo-performance.vercel.app/api/vix';
 
 // ===== 帳號網址：account.html?id=<代號>；home: false 的帳號頁不顯示「← 總表」=====
 const ACCOUNTS = [
-    { id: 'demo',       name: '示範帳號' },
+    { id: 'demo',       name: '示範帳號', title: ['選擇權雙賣平衡下單機', '示範帳號'] },   // title：績效頁標題改用這個，不放「歐大的投資報表」小字
     { id: 'kgi',        name: '歐大_凱基' },
     { id: 'main',       name: '大帳號' },
     { id: 'gary',       name: 'gary-lan' },

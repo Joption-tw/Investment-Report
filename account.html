@@ -537,7 +537,7 @@
 
             useEffect(() => {
                 if (!name) return;
-                document.title = `${name} 績效 · 歐大的投資報表`;
+                document.title = ACCT.title ? ACCT.title.join(' ') : `${name} 績效 · 歐大的投資報表`;
                 loadLive();
                 const timer = setInterval(loadLive, 60000);
                 return () => clearInterval(timer);
@@ -632,10 +632,10 @@
                             ? html`<a href="./" className="self-start sm:self-center sm:justify-self-start inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-900 text-yellow-400 font-black text-xs hover:bg-slate-800">← 總表</a>`
                             : html`<div className="hidden sm:block"></div>`}
                         <div className="text-center">
-                            <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">${name}<span className="text-slate-400 font-bold text-lg sm:text-2xl ml-2">即時績效</span></h1>
+                            <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">${ACCT.title ? ACCT.title[0] : name}<span className="text-slate-400 font-bold text-lg sm:text-2xl ml-2">${ACCT.title ? ACCT.title[1] : '即時績效'}</span></h1>
                             <div className="flex items-center justify-center gap-2 flex-wrap mt-1">
-                                <span className="text-[10px] sm:text-xs font-bold text-slate-400 tracking-widest">歐大的投資報表 · 雙賣平衡</span>
-                                ${isCurrent && html`<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-600 live-indicator"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> LIVE</span>`}
+                                ${!ACCT.title && html`<span className="text-[10px] sm:text-xs font-bold text-slate-400 tracking-widest">歐大的投資報表 · 雙賣平衡</span>`}
+                                ${isCurrent && !ACCT.title && html`<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-600 live-indicator"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> LIVE</span>`}
                                 <button onClick=${copyLink} title="複製這個帳號的網址" className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 text-[11px] font-bold max-w-full truncate">
                                     🔗 ${copied ? '已複製網址' : shortUrl}
                                 </button>
