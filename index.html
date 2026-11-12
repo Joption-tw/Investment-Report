@@ -779,7 +779,7 @@
             const legFmt = v => fmtLeg(v, d);
             const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
 
-            // 橡皮擦：按鈕一直顯示，沒輸入過密碼的瀏覽器按下去會先要密碼
+            // 橡皮擦：按鈕一直顯示，不用密碼（2026-11-12 歐大決定），誰都可以塗掉 / 還原
             const canErase = metric !== 'vix';
             const [eraser, setEraser]       = useState(false);
             const [askKey, setAskKey]       = useState(false);
@@ -830,7 +830,6 @@
             const restoreAll = () => { markErased(erasedHere, false); postErase(erasedHere, 'restore'); };
             const toggleEraser = () => {
                 if (eraser) { setEraser(false); return; }
-                if (!getEraseKey()) { setAskKey(v => !v); setEraseMsg(''); return; }
                 setEraser(true);
                 setEraseMsg('');
             };

@@ -1,6 +1,6 @@
 // 歐大的投資報表：帳號頁走勢圖的「橡皮擦」
 // 網頁上把不合理的點塗掉 / 還原時，送到這個網頁應用程式，記到試算表「塗掉紀錄」分頁；
-// 所有人打開帳號頁都會讀這個分頁，塗掉的點就不畫。要有密碼才能寫入。
+// 所有人打開帳號頁都會讀這個分頁，塗掉的點就不畫。不用密碼，誰都可以寫入。
 //
 // 安裝（獨立的 Apps Script 專案，不放在試算表綁定的專案裡，避免跟原本的 doGet / doPost 撞名）：
 //   1. script.google.com →「新專案」，把這整個檔案貼上，按儲存
@@ -43,8 +43,7 @@ function doGet() {
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return out_({ ok: false, error: '格式錯誤' }); }
-  const key = PropertiesService.getScriptProperties().getProperty('ERASE_KEY');
-  if (!key || body.key !== key) return out_({ ok: false, error: '密碼錯誤' });
+  // 2026-11-12 歐大決定不用密碼：誰都可以塗掉 / 還原（點都還原得回來）
   if (body.check) return out_({ ok: true });
 
   const items = (body.items || []).filter(it => it

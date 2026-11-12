@@ -432,7 +432,7 @@
             const [loading, setLoading]   = useState(true);
             const [copied, setCopied]     = useState(false);
 
-            // 橡皮擦：塗掉的點 = 試算表「塗掉紀錄」（隱藏分頁）＋這次在頁面上塗 / 還原的；按鈕一直顯示，沒輸入過密碼的瀏覽器按下去會先要密碼
+            // 橡皮擦：塗掉的點 = 試算表「塗掉紀錄」（隱藏分頁）＋這次在頁面上塗 / 還原的；按鈕一直顯示，不用密碼（2026-11-12 歐大決定），誰都可以塗掉 / 還原
             // 一般人看到的圖不會有任何塗掉的痕跡：塗掉的點直接不畫，前後兩點連起來
             const [erased, setErased]       = useState(() => new Set());
             const [overrides, setOverrides] = useState(() => new Map());
@@ -484,7 +484,6 @@
             const toggleEraser = () => {
                 if (eraser) { setEraser(false); return; }
                 if (!ERASE_API) { setEraseMsg('橡皮擦還沒設定好'); return; }
-                if (!getEraseKey()) { setAskKey(v => !v); setEraseMsg(''); return; }
                 setEraser(true);
                 setEraseMsg('');
             };
