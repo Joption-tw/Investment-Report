@@ -381,9 +381,8 @@
         };
         const remoteUrl = a => REMOTE_SESSION[a.id] ? `https://remotedesktop.google.com/access/session/${REMOTE_SESSION[a.id]}` : accountUrl(a);
 
-        const RATIO_EXTREME = 0.30;
-        const RATIO_WARNING = 0.35;
-        const RATIO_MILD    = 0.40;
+        const RATIO_WARNING = 0.35;   // 0.35 以下 / 0.65 以上：最深色＋紅框
+        const RATIO_MILD    = 0.45;   // 低於 0.45 / 高於 0.55 開始上色，越偏越深
         const MARGIN_CRIT   = 10;
         const MARGIN_HIGH   = 20;
         const MARGIN_MED    = 30;
@@ -395,14 +394,22 @@
             return trimmed.startsWith('-') || (trimmed.startsWith('(') && trimmed.endsWith(')'));
         };
 
-        const getRatioGradientClass = (header, val) => {
-            if (!header || (!header.includes('比值平衡') && !header.includes('買權比值'))) return "";
+        // 買權比值偏離 0.5 的程度：0（0.45～0.55 不上色）→ 1（0.35 以下 / 0.65 以上最深）；不上色回傳 null
+        const ratioHeatOf = (header, val) => {
+            if (!header || (!header.includes('比值平衡') && !header.includes('買權比值'))) return null;
             const num = parseFloat(val);
-            if (isNaN(num) || (num >= RATIO_MILD && num <= (1 - RATIO_MILD))) return "";
-            if (num <= RATIO_EXTREME || num >= (1 - RATIO_EXTREME)) return "bg-gradient-to-br from-yellow-500 via-yellow-400 to-yellow-300 text-slate-900 shadow-inner";
-            if (num <= RATIO_WARNING || num >= (1 - RATIO_WARNING)) return "bg-gradient-to-br from-yellow-400 via-yellow-300 to-yellow-200 text-slate-900 shadow-sm";
-            return "bg-gradient-to-br from-yellow-200 via-yellow-100 to-yellow-50 text-slate-900";
+            if (isNaN(num)) return null;
+            const r4 = x => Math.round(x * 10000) / 10000, d = r4(Math.abs(num - 0.5)), lo = r4(0.5 - RATIO_MILD), hi = r4(0.5 - RATIO_WARNING);
+            if (d <= lo) return null;
+            return Math.min(1, (d - lo) / (hi - lo));
         };
+        // 淺黃 (yellow-100) 漸變到深黃 (yellow-500)
+        const ratioBgOf = h => {
+            const mix = (a, b) => Math.round(a + (b - a) * h);
+            const c1 = `rgb(${mix(254, 234)},${mix(249, 179)},${mix(195, 8)})`, c2 = `rgb(${mix(254, 250)},${mix(252, 204)},${mix(232, 21)})`;
+            return { background: `linear-gradient(135deg, ${c1}, ${c2})` };
+        };
+        const getRatioGradientClass = (header, val) => ratioHeatOf(header, val) === null ? "" : "text-slate-900 shadow-inner";
 
         const getMarginGradientClass = (header, val) => {
             if (!header || (!header.includes('剩餘比率') && !header.includes('保證金剩餘比例'))) return "";
@@ -900,7 +907,9 @@
             // 獲利金額 / 獲利率跟當盤欄位同一套顏色：紅底 = 賺、綠底 = 賠
             const pnlNum = header.includes('獲利金額') || header.includes('獲利率') ? toNum(val) : null;
             const pnlClass = pnlNum === null ? '' : RESULT[resultOf(pnlNum)].cell;
-            return { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass };
+            const heat = ratioHeatOf(header, val);
+            const ratioStyle = heat === null ? null : ratioBgOf(heat);
+            return { isNeg, isDisc, ratioGradient, ratioStyle, marginClass, isAlertExtreme, pnlClass };
         };
 
         const App = () => {
@@ -1086,7 +1095,7 @@
             };
 
             const renderCell = (cell, cIdx) => {
-                const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass } = getCellStyle(headers[cIdx] || '', cell);
+                const { isNeg, isDisc, ratioGradient, ratioStyle, marginClass, isAlertExtreme, pnlClass } = getCellStyle(headers[cIdx] || '', cell);
                 let cls = `px-4 py-2.5 text-xs ${pnlClass ? 'font-black' : 'font-bold'} font-mono-data text-center `;
                 if (isDisc)              cls += "bg-red-600 text-white animate-pulse";
                 else if (isAlertExtreme) cls += ratioGradient + " text-red-700 ring-2 ring-inset ring-red-600";
@@ -1097,7 +1106,7 @@
                 else                     cls += "text-slate-700";
                 const acct = cIdx === 0 && accountOf(cell);
                 if (acct) return html`<td key=${cIdx} className=${cls}><a href=${remoteUrl(acct)} target="_blank" rel="noopener" title="連到這一台的遠端桌面" className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">${cell}</a></td>`;
-                return html`<td key=${cIdx} className=${cls}>${cell || '0'}</td>`;
+                return html`<td key=${cIdx} className=${cls} style=${ratioStyle || undefined}>${cell || '0'}</td>`;
             };
 
             // 換週了（週三 15:00 起）但試算表的起始資產還沒重設（例：11/4 拖到 23:24 才重設）：
@@ -1221,7 +1230,7 @@
                 const shown = shownRow(row);
                 const cardRows = headers.slice(1).map((h, i) => {
                     const cell = shown[i + 1];
-                    const { isNeg, isDisc, ratioGradient, marginClass, isAlertExtreme, pnlClass } = getCellStyle(h, cell);
+                    const { isNeg, isDisc, ratioGradient, ratioStyle, marginClass, isAlertExtreme, pnlClass } = getCellStyle(h, cell);
                     let highlightClass = "";
                     let textClass = isNeg ? "text-red-500" : "text-slate-800";
                     if (marginClass)         { highlightClass = marginClass + " rounded"; if (marginClass.includes('text-white')) textClass = "text-white"; }
@@ -1231,7 +1240,7 @@
                     else if (pnlClass)       { highlightClass = pnlClass + " rounded"; textClass = ""; }
                     const labelClass = "text-[9px] font-bold uppercase truncate max-w-[60px] leading-none tracking-tighter " + (highlightClass && textClass === "text-white" ? 'text-white' : 'text-slate-400');
                     return html`
-                        <div key=${i} className=${"flex justify-between items-center border-b border-slate-50 py-1 px-1.5 " + highlightClass}>
+                        <div key=${i} className=${"flex justify-between items-center border-b border-slate-50 py-1 px-1.5 " + highlightClass} style=${ratioStyle || undefined}>
                             <span className=${labelClass}>${h}</span>
                             <span className=${"text-xs font-mono-data font-black leading-none " + textClass}>${cell || '0'}</span>
                         </div>`;
