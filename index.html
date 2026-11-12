@@ -494,7 +494,7 @@
         const TREND_METRICS = {
             tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '這一期合約的時間價值：下單程式回報值，以凱基程式為主，沒更新時用其他帳號的中位數，每 2 分鐘一筆' },
             fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '數字是期交所近月台指期；曲線是下單程式每 2 分鐘的指數，兩者有價差' },
-            vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數，只有日盤；夜盤顯示最近一個日盤' }
+            vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數：日盤是期交所的；期交所夜盤不公布，夜盤用同一套方法自己算（只有最近一個夜盤）' }
         };
         const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
                                  + `&tq=${encodeURIComponent(`select A,F,K where B starts with '示範帳號' and A >= '${since}'`)}&t=${Date.now()}`;
@@ -580,12 +580,24 @@
             });
         };
         const fetchVix = (date) => fetch(date ? `${VIX_URL}?date=${date}` : VIX_URL).then(r => r.ok ? r.json() : null).catch(() => null);
+        // 夜盤 VIX：期交所不公布，用監控中心照期交所編製方法自己算的（每 2 分鐘一筆，只留最近一個夜盤），訪客預覽就拿得到，不用登入
+        const MON_API = 'https://script.google.com/macros/s/AKfycbz7zFm3gVFAq_-y8pxc873AeK0jAWyyrPbUJ9PL3N4vdllJ55rKnOBlbSXAP5zM99tlpQ/exec';
+        const fetchVixNight = () => fetch(MON_API, { method: 'POST', body: JSON.stringify({ action: 'preview' }) })
+            .then(r => r.ok ? r.json() : null)
+            .then(j => {
+                const n = j && j.vixSelf && j.vixSelf.night;
+                if (!n || !n.v || !n.start) return [];
+                return n.v.map((x, i) => x === null ? null : { t: n.start + 8 * 3600e3 + i * 60e3, vix: x, night: true })
+                          .filter(Boolean).map(p => ({ ...p, ...slotAt(new Date(p.t)) }));
+            }).catch(() => []);
+        // 夜盤接在日盤後面才用（夜盤開始時間比日盤最後一筆晚）；隔天日盤開了就換回期交所的
+        const nightAfter = (night, day) => night.length && (!day.length || night[0].t > day[day.length - 1].t) ? night : [];
         // 本週每個日盤；今天用即時的。週三夜盤剛換週、還沒有日盤時用最近一個日盤
         const fetchVixWeek = async (week) => {
             const today = ymd(tpeNow());
             const dates = SLOT_DEFS.filter(d => d.type === 'D').map(d => addDays(week, d.off)).filter(d => d < today);
-            const [now, ...past] = await Promise.all([fetchVix(), ...dates.map(d => fetchVix(d.replace(/-/g, '')))]);
-            const latest = parseVixTicks(now);
+            const [now, night, ...past] = await Promise.all([fetchVix(), fetchVixNight(), ...dates.map(d => fetchVix(d.replace(/-/g, '')))]);
+            const day = parseVixTicks(now), latest = [...day, ...nightAfter(night, day)];
             const seen = new Set(latest.length ? [sessionKey(latest[0])] : []);
             const rows = past.map(parseVixTicks).filter(r => r.length && !seen.has(sessionKey(r[0]))).flat();
             const all = [...rows, ...latest].filter(p => p.week === week).sort((a, b) => a.t - b.t);
@@ -940,6 +952,7 @@
             const [trend, setTrend]             = useState([]);
             const [vixDay, setVixDay]           = useState([]);
             const [vixQ, setVixQ]               = useState(null);
+            const [vixNight, setVixNight]       = useState([]);
             // 示範帳戶試算表本週的期指、週三週五時價（頁首時間價值、每盤績效表的時價都用它）
             const [demo, setDemo]               = useState(null);
             useEffect(() => {
@@ -986,8 +999,11 @@
             }, []);
             useEffect(() => {
                 const load = () => fetchVix().then(v => { const r = parseVixTicks(v); if (r.length) setVixDay(r); if (v && v.quote) setVixQ(v.quote); });
-                load();
-                const timer = setInterval(load, 60000);
+                // 夜盤 VIX 2 分鐘一筆；日盤時段（08:45～13:45）用不到，不去問
+                const loadNight = () => { const hm = tpeNow().getUTCHours() * 100 + tpeNow().getUTCMinutes(); if (hm < 840 || hm > 1350 || !tick) fetchVixNight().then(setVixNight); };
+                let tick = 0;
+                load(); loadNight();
+                const timer = setInterval(() => { tick++; load(); if (tick % 2 === 0) loadNight(); }, 60000);
                 return () => clearInterval(timer);
             }, []);
 
@@ -1352,12 +1368,18 @@
             const futSubs = fut && html`
                 <span>漲跌是比前一交易日結算價 ${fut.ref.toLocaleString()}</span>
                 <span>${fut.session === 'D' ? '日盤' : '夜盤'}${futMarketOpen() ? '' : '已收盤'}，期交所報價 ${hms(fut.time)} 取得</span>`;
-            const vixNum = vixDay.length ? vixDay[vixDay.length - 1].vix : vixQ && (vixQ.last || vixQ.ref) || null;
+            // 夜盤：用自算的夜盤 VIX，比日盤收盤；日盤：期交所的，比前一交易日收盤
+            const vixN = nightAfter(vixNight, vixDay), vixNightLast = vixN.length ? vixN[vixN.length - 1] : null;
+            const vixDayClose = vixDay.length ? vixDay[vixDay.length - 1].vix : vixQ && (vixQ.last || vixQ.ref) || null;
+            const vixNum = vixNightLast ? vixNightLast.vix : vixDayClose;
             const vixValue = vixNum ? vixNum.toFixed(2) : '--';
             const vixRef = vixQ && vixQ.ref, vixChg = vixNum && vixRef && vixQ.last ? vixNum - vixRef : null;
-            const vixSubs = vixRef && html`
+            const vixNightChg = vixNightLast && vixDayClose ? vixNightLast.vix - vixDayClose : null;
+            const vixSubs = vixNightLast ? html`
+                ${vixNightChg !== null && html`<span><b className=${upDown(vixNightChg)}>${sgn(vixNightChg, 2)}</b> 比日盤收盤 ${vixDayClose.toFixed(2)}</span>`}
+                <span>夜盤 VIX 期交所不公布，照期交所方法自己算，${hhmm(vixNightLast.t)} 更新</span>` : vixRef && html`
                 ${vixChg !== null ? html`<span><b className=${upDown(vixChg)}>${sgn(vixChg, 2)}</b> 比前一交易日收盤 ${vixRef.toFixed(2)}</span>` : html`<span>今天還沒開盤，前一交易日收盤 ${vixRef.toFixed(2)}</span>`}
-                <span>VIX 只有日盤，收盤後到隔天開盤前都是當天收盤值</span>`;
+                <span>日盤是期交所的 VIX；夜盤期交所不公布，會改用自己算的</span>`;
 
             const trendCell = (key, value, valueClass, { label, values, extra, subs, cls = '' }) => html`
                 <button type="button" key=${key} onClick=${() => setTrendKey(key)} title=${`放大${TREND_METRICS[key].label}走勢圖`}
@@ -1376,7 +1398,7 @@
                 ${trendCell('fut', futValue, 'hl-fut' + futStale, { label: futMonth ? `台指期 ${+futMonth} 月` : '台指期', values: trend.filter(p => !isTrendErased(erased, 'fut', p)).map(p => p.fut), subs: futSubs,
                     cls: pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '',
                     extra: html`<span className=${"hl-chg font-mono-data" + futStale}><span className="hl-pts">${pointsChangeFormatted}</span><span className="hl-pct">(${percentChange})</span></span>` })}
-                ${trendCell('vix', vixValue, 'hl-vix', { values: vixDay.map(p => p.vix), subs: vixSubs })}`;
+                ${trendCell('vix', vixValue, 'hl-vix', { label: vixNightLast ? '夜盤波動率 VIX' : null, values: [...vixDay, ...vixN].map(p => p.vix), subs: vixSubs })}`;
 
             return html`
                 <div id="app-root" className="flex flex-col min-h-screen bg-slate-50 select-none overflow-x-hidden">
