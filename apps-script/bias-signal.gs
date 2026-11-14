@@ -16,6 +16,7 @@ const BIAS_TAB       = '多空紀錄';
 const BIAS_HEADER    = ['記錄時間', '盤別', '多空指標', '期貨'];
 const BIAS_KEEP_DAYS = 14;                // 試算表只留 14 天；GitHub Actions 每小時存到 data/bias/<週>.json 長期保存
 const BIAS_TZ        = 'Asia/Taipei';
+const BIAS_SCAN_ROWS = 1000;              // 覆蓋同一分鐘時，往回比對最近幾筆（每分鐘一筆，約 16 小時）
 
 // 第一次執行時自動產生密碼並印在執行記錄；之後再執行會印出同一組（要換密碼：先執行 resetBiasKey）
 function setBiasKey() {
@@ -62,24 +63,39 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
-    const last = props.getProperty('biasLast') || '';
     const rows = (body.rows || []).filter(r => r
-        && /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/.test(r.t) && r.t > last
+        && /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/.test(r.t)
         && (r.sess === '日盤' || r.sess === '夜盤')
         && typeof r.v === 'number' && r.v >= -100 && r.v <= 100
         && typeof r.fut === 'number' && r.fut > 0 && r.fut < 1e6)
       .slice(0, 1000)
       .sort((a, b) => a.t < b.t ? -1 : 1)
       .map(r => [r.t, r.sess, Math.round(r.v), r.fut]);
+    let added = 0, replaced = 0;
     if (rows.length) {
+      // 同一分鐘只留一筆：兩台電腦都上傳、或斷線補送時，同一分鐘的舊資料直接覆蓋（以最近約 16 小時的紀錄比對）
       const sh = biasSheet_();
-      sh.getRange(sh.getLastRow() + 1, 1, rows.length, BIAS_HEADER.length).setValues(rows);
-      props.setProperty('biasLast', rows[rows.length - 1][0]);
+      const lastRow = sh.getLastRow();
+      const from = Math.max(2, lastRow - BIAS_SCAN_ROWS + 1);
+      const byMinute = new Map();
+      if (lastRow >= from) {
+        sh.getRange(from, 1, lastRow - from + 1, 1).getDisplayValues()
+          .forEach((v, i) => { if (v[0]) byMinute.set(v[0].slice(0, 16), from + i); });
+      }
+      const append = [];
+      rows.forEach(r => {
+        const m = r[0].slice(0, 16), at = byMinute.get(m);
+        if (typeof at === 'number') { sh.getRange(at, 1, 1, BIAS_HEADER.length).setValues([r]); replaced++; }
+        else if (typeof at === 'object') { at.splice(0, 4, ...r); replaced++; }   // 同一批裡同一分鐘：留最後一筆
+        else { append.push(r); byMinute.set(m, r); }
+      });
+      if (append.length) sh.getRange(sh.getLastRow() + 1, 1, append.length, BIAS_HEADER.length).setValues(append);
+      added = append.length;
     }
     // 每天第一次寫入時清掉 14 天前的紀錄
     const today = Utilities.formatDate(new Date(), BIAS_TZ, 'yyyy-MM-dd');
     if (props.getProperty('biasTrimmed') !== today) { biasTrim_(biasSheet_()); props.setProperty('biasTrimmed', today); }
-    return biasOut_({ ok: true, n: rows.length });
+    return biasOut_({ ok: true, n: added + replaced, added, replaced });
   } finally {
     lock.releaseLock();
   }
