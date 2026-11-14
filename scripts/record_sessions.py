@@ -4,6 +4,7 @@
 #   - 每盤存「收盤前最後一筆快照」的獲利金額 / 起始資產（網頁再算每盤增減），另存開盤第一筆當備援
 #   - 百點震幅、週三 / 週五時價（BA / BB）取自示範帳戶試算表（或 sample 的每週存檔）；VIX 取自 sample 的每日存檔
 #   - 另把盤中每一筆快照依週存到 data/series/<週起始日>.json，各帳號網頁（account.html）的走勢圖用
+#   - 多空指標（試算表「多空紀錄」分頁）依週存到 data/bias/<週起始日>.json
 #     快照來源：「兩分鐘紀錄」分頁（apps-script/two-minute-log.gs，每 2 分鐘）＋「績效表」裡每 10 分鐘的快照
 # 由 .github/workflows/record-sessions.yml 定時執行（只用 Python 標準函式庫，不需安裝套件）
 import csv, io, json, os, re, urllib.parse, urllib.request
@@ -256,8 +257,49 @@ def save_series(snaps):
         print(f'走勢 {path}：{len(times)} 筆')
 
 
+# ── 多空指標（apps-script/bias-signal.gs 每分鐘一筆，試算表保留 14 天）：依週存到 data/bias/<週起始日>.json 長期保存 ──
+BIAS_SHEET = '多空紀錄'
+BIAS_DIR   = 'data/bias'
+
+
+def save_bias(hours=30):
+    since = (datetime.now(TPE) - timedelta(hours=hours)).strftime('%Y/%m/%d %H:%M:%S')
+    url = (f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&headers=1'
+           f'&sheet={urllib.parse.quote(BIAS_SHEET)}&tq={urllib.parse.quote(f"select A,C,D where A >= {since!r}")}')
+    try:
+        rows = list(csv.reader(io.StringIO(get(url))))
+    except Exception as e:
+        print('多空紀錄讀取失敗（還沒安裝的話正常）：', e); return
+    if not rows or rows[0][:2] != ['記錄時間', '多空指標']:
+        print('沒有「多空紀錄」分頁，略過'); return
+    by_week = {}
+    for r in rows[1:]:
+        if len(r) < 3 or not re.match(r'^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}$', r[0].strip()): continue
+        ts = datetime.strptime(r[0].strip(), '%Y/%m/%d %H:%M:%S').replace(tzinfo=TPE)
+        key, bias = session_of(ts), num(r[1])
+        if not key or bias is None: continue
+        by_week.setdefault(week_of(*key).isoformat(), {})[ts.strftime('%Y-%m-%d %H:%M:%S')] = (bias, num(r[2]))
+    for week, items in by_week.items():
+        path = f'{BIAS_DIR}/{week}.json'
+        try:
+            with open(path, encoding='utf-8') as f: old = json.load(f)
+        except FileNotFoundError:
+            old = {'week': week, 't': [], 'bias': [], 'fut': []}
+        points = {t: (old['bias'][k], old['fut'][k]) for k, t in enumerate(old['t'])}
+        points.update(items)
+        times = sorted(points)
+        data = {'week': week, 't': times, 'bias': [points[t][0] for t in times], 'fut': [points[t][1] for t in times]}
+        if data == old: continue
+        os.makedirs(BIAS_DIR, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+            f.write('\n')
+        print(f'多空指標 {path}：{len(times)} 筆')
+
+
 def main():
     now = datetime.now(TPE)
+    save_bias()
     try:
         with open(OUT, encoding='utf-8') as f: store = json.load(f)
     except FileNotFoundError:

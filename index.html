@@ -58,6 +58,7 @@
         .hl-tv { color: #fde047; font-size: 34px; font-weight: 900; line-height: 1; }
         .hl-fut { color: #fff; font-size: 22px; font-weight: 700; line-height: 1; }
         .hl-vix { color: #7dd3fc; font-size: 22px; font-weight: 700; line-height: 1; }
+        .hl-bias { font-size: 22px; font-weight: 700; line-height: 1; }
         .hl-chg { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; line-height: 1; }
         .hl-pts { font-size: 30px; font-weight: 900; }
         .hl-pct { font-size: 20px; font-weight: 700; }
@@ -143,9 +144,10 @@
             .hl-cell { padding: 6px 4px; }
             .hl-label { margin-bottom: 4px; font-size: 11px; }
             .hl-tv { font-size: 24px; }
-            .hl-fut, .hl-vix { font-size: 15px; }
+            .hl-fut, .hl-vix, .hl-bias { font-size: 15px; }
             .hl-stats { flex-wrap: wrap; }
             .hl-stats > .hl-btn { flex: 1 1 30%; }
+            .hl-stats > .hl-bias-cell { flex: 1 1 70%; border-top: 1px solid #1e293b; }
             .hl-stats > .hl-chg-cell { order: 5; flex: 1 1 100%; flex-direction: row; gap: 8px; }
             .hl-stats > .hl-chg-cell .hl-label { margin: 0; }
             .hl-chg { gap: 4px; }
@@ -198,9 +200,10 @@
         html.m-portrait header .divide-x > * { flex: 1 1 auto !important; }
         html.m-portrait header .hl-label { margin-bottom: 10px; font-size: 22px !important; }
         html.m-portrait header .hl-tv { font-size: 68px !important; }
-        html.m-portrait header .hl-fut, html.m-portrait header .hl-vix { font-size: 40px !important; }
+        html.m-portrait header .hl-fut, html.m-portrait header .hl-vix, html.m-portrait header .hl-bias { font-size: 40px !important; }
         html.m-portrait header .hl-stats { flex-wrap: wrap; }
         html.m-portrait header .hl-stats > .hl-btn { flex: 1 1 30% !important; }
+        html.m-portrait header .hl-stats > .hl-bias-cell { flex: 1 1 70% !important; border-top: 1px solid #1e293b; }
         html.m-portrait header .hl-stats > .hl-chg-cell { order: 5; flex: 1 1 70% !important; flex-direction: row; gap: 20px; border-top: 1px solid #1e293b; }
         html.m-portrait header .hl-stats > .hl-chg-cell .hl-label { margin: 0; }
         html.m-portrait header .hl-stats > .hl-refresh { order: 6; flex: 1 1 10% !important; border-top: 1px solid #1e293b; }
@@ -256,7 +259,7 @@
             header .divide-x span { margin: 0 !important; }
             header .hl-label { font-size: 9px; }
             header .hl-tv { font-size: 20px; }
-            header .hl-fut, header .hl-vix { font-size: 13px; }
+            header .hl-fut, header .hl-vix, header .hl-bias { font-size: 13px; }
             header .hl-stats { flex-wrap: nowrap; }
             header .hl-chg { gap: 3px; }
             header .hl-pts { font-size: 18px; }
@@ -494,8 +497,22 @@
         const TREND_METRICS = {
             tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '這一期合約的時間價值：下單程式回報值，以凱基程式為主，沒更新時用其他帳號的中位數，每 2 分鐘一筆' },
             fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '數字是期交所近月台指期；曲線是下單程式每 2 分鐘的指數，兩者有價差' },
-            vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數：日盤是期交所的；期交所夜盤不公布，夜盤用同一套方法自己算（只有最近一個夜盤）' }
+            vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數：日盤是期交所的；期交所夜盤不公布，夜盤用同一套方法自己算（只有最近一個夜盤）' },
+            bias: { label: '多空指標', color: '#7c3aed', spark: '#c4b5fd', note: '歐大電腦上的多空監控程式依選擇權盤面算出的多空指標：-100 極空 ~ 0 中性 ~ +100 極多，每分鐘一筆' }
         };
+        // ===== 多空指標：試算表「多空紀錄」分頁（apps-script/bias-signal.gs 接收歐大電腦每分鐘上傳）=====
+        const BIAS_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('多空紀錄')}`
+                              + `&tq=${encodeURIComponent(`select A,B,C,D where A >= '${since}'`)}&t=${Date.now()}`;
+        const parseBias = (rows) => {
+            if (!rows.length || rows[0][0] !== '記錄時間' || rows[0][2] !== '多空指標') return [];   // 還沒安裝接收程式
+            return rows.slice(1).map(r => ({ t: wallMs(r[0]), bias: toNum(r[2]), biasFut: toNum(r[3]) }))
+                       .filter(p => p.t !== null && p.bias !== null).map(p => ({ ...p, ...slotAt(new Date(p.t)) }))
+                       .sort((a, b) => a.t - b.t);
+        };
+        const fetchBias = (since) => fetch(BIAS_URL(since.replace(/-/g, '/'))).then(r => r.ok ? r.text() : '').then(t => t ? parseBias(parseCSV(t)) : [], () => []);
+        const biasText = v => v === null || v === undefined ? '--' : `${v > 0 ? '+' : ''}${Math.round(v)}`;
+        const biasWord = v => v > 0 ? '偏多' : v < 0 ? '偏空' : '中性';
+        const biasColor = v => v > 0 ? '#f87171' : v < 0 ? '#34d399' : '#e2e8f0';
         const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
                                  + `&tq=${encodeURIComponent(`select A,F,K where B starts with '示範帳號' and A >= '${since}'`)}&t=${Date.now()}`;
         const sessionKey = p => `${p.week}-${p.slot}`;
@@ -758,6 +775,7 @@
             const [pts, setPts]       = useState(null);
             const [vixPts, setVixPts] = useState(null);
             const [tvWeek, setTvWeek] = useState(null);
+            const [biasWeek, setBiasWeek] = useState(null);
             const [failed, setFailed] = useState(null);
             const [ready, setReady]   = useState(!!window.echarts);
             useEffect(() => { loadEcharts().then(() => setReady(true), e => setFailed(e.message)); }, []);
@@ -767,6 +785,7 @@
                     fetchTrend(slotOpen(week, 0)).then(p => { setPts(p.filter(x => x.week === week)); setFailed(null); }, e => setFailed(e.message));
                     fetchVixWeek(week).then(setVixPts);
                     fetchTvSeries(slotOpen(week, 0)).then(p => setTvWeek(p.filter(x => x.week === week)), () => {});
+                    fetchBias(slotOpen(week, 0)).then(p => setBiasWeek(p.filter(x => x.week === week)));
                 };
                 load();
                 const timer = setInterval(load, 120000);
@@ -781,12 +800,13 @@
             // 時間價值：本週整段（只留現在這一期合約），最後補上頁首的最新值
             const tvKeyNow = tvPts && tvPts.length ? tvKeyAt(tvPts[tvPts.length - 1].week, tvPts[tvPts.length - 1].t) : null;
             const tvAll = tvWeek && tvKeyNow ? [...tvWeek.filter(p => tvKeyAt(p.week, p.t) === tvKeyNow && p.t < tvPts[tvPts.length - 1].t), tvPts[tvPts.length - 1]] : tvPts;
-            const rawSource = metric === 'vix' ? vixPts : metric === 'tv' && tvAll && tvAll.length ? tvAll : pts;
+            const rawSource = metric === 'vix' ? vixPts : metric === 'bias' ? biasWeek : metric === 'tv' && tvAll && tvAll.length ? tvAll : pts;
             const source = rawSource && rawSource.filter(p => !isTrendErased(erased, metric, p));
             const last = source && source.length ? source[source.length - 1] : null;
             const rows = !last ? [] : range === 'week' ? source : source.filter(p => sessionKey(p) === sessionKey(last));
             const sub = !last ? '' : range === 'week' ? `本週 ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}` : `${SLOT_DEFS[last.slot].label} ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}`;
-            const msg = failed && metric !== 'vix' ? `${failed}，稍後再試` : !source || !ready ? '載入中…' : !rows.length ? '這一週還沒有走勢資料' : null;
+            const msg = failed && metric !== 'vix' && metric !== 'bias' ? `${failed}，稍後再試` : !source || !ready ? '載入中…'
+                      : !rows.length ? (metric === 'bias' ? '這一週還沒有多空指標資料（等歐大電腦的監控程式開始上傳）' : '這一週還沒有走勢資料') : null;
             // 相鄰高低點相差多少（跟圖上標的點同一套找法），加總 = 這段走勢來回走了多少
             const legVals = rows.map(p => p[metric]);
             const legTurns = msg ? [] : findTurns(legVals, TURNS_MAX[range]);
@@ -799,14 +819,14 @@
             const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
 
             // 橡皮擦：按鈕一直顯示，不用密碼（2026-11-12 歐大決定），誰都可以塗掉 / 還原
-            const canErase = metric !== 'vix';
+            const canErase = metric !== 'vix' && metric !== 'bias';
             const [eraser, setEraser]       = useState(false);
             const [askKey, setAskKey]       = useState(false);
             const [keyInput, setKeyInput]   = useState('');
             const [eraseMsg, setEraseMsg]   = useState('');
             const [undoStack, setUndoStack] = useState([]);
             const batch = useRef(new Map());
-            useEffect(() => { if (metric === 'vix') setEraser(false); }, [metric]);
+            useEffect(() => { if (metric === 'vix' || metric === 'bias') setEraser(false); }, [metric]);
             const postErase = async (items, action) => {
                 try {
                     const r = await fetch(ERASE_API, { method: 'POST', body: JSON.stringify({ key: getEraseKey(), items: items.map(it => ({ ...it, action })) }) });
@@ -1004,6 +1024,14 @@
                 let tick = 0;
                 load(); loadNight();
                 const timer = setInterval(() => { tick++; load(); if (tick % 2 === 0) loadNight(); }, 60000);
+                return () => clearInterval(timer);
+            }, []);
+            // 多空指標：最近 20 小時（涵蓋整個夜盤），每分鐘更新
+            const [biasPts, setBiasPts] = useState([]);
+            useEffect(() => {
+                const load = () => fetchBias(new Date(tpeNow() - 20 * 3600e3).toISOString().slice(0, 19).replace('T', ' ')).then(setBiasPts);
+                load();
+                const timer = setInterval(load, 60000);
                 return () => clearInterval(timer);
             }, []);
 
@@ -1381,6 +1409,14 @@
                 ${vixChg !== null ? html`<span><b className=${upDown(vixChg)}>${sgn(vixChg, 2)}</b> 比前一交易日收盤 ${vixRef.toFixed(2)}</span>` : html`<span>今天還沒開盤，前一交易日收盤 ${vixRef.toFixed(2)}</span>`}
                 <span>日盤是期交所的 VIX；夜盤期交所不公布，會改用自己算的</span>`;
 
+            // 多空指標：當盤的走勢；超過 5 分鐘沒新資料（監控電腦關機、斷線）就註明
+            const biasLast = biasPts.length ? biasPts[biasPts.length - 1] : null;
+            const biasSession = biasLast ? biasPts.filter(p => sessionKey(p) === sessionKey(biasLast)) : [];
+            const biasAgeMin = biasLast ? Math.floor((tpeNow() - biasLast.t) / 60e3) : null;
+            const biasValue = biasLast ? html`<span style=${{ color: biasColor(biasLast.bias) }}>${biasWord(biasLast.bias)} ${biasText(biasLast.bias)}</span>` : '--';
+            const biasSubs = biasLast ? html`
+                <span>${SLOT_DEFS[biasLast.slot].label} · 更新 ${mdLabel(ymd(new Date(biasLast.t)))} ${hhmm(biasLast.t)}${biasAgeMin > 5 ? `（已 ${biasAgeMin} 分鐘沒有新資料）` : ''}</span>
+                <span>-100 極空 ~ 0 中性 ~ +100 極多</span>` : html`<span>還沒有資料（等歐大電腦的監控程式開始上傳）</span>`;
             const trendCell = (key, value, valueClass, { label, values, extra, subs, cls = '' }) => html`
                 <button type="button" key=${key} onClick=${() => setTrendKey(key)} title=${`放大${TREND_METRICS[key].label}走勢圖`}
                         className=${"hl-cell hl-btn flex-1 xl:flex-none flex flex-col items-center justify-center text-center " + cls}>
@@ -1398,7 +1434,8 @@
                 ${trendCell('fut', futValue, 'hl-fut' + futStale, { label: futMonth ? `台指期 ${+futMonth} 月` : '台指期', values: trend.filter(p => !isTrendErased(erased, 'fut', p)).map(p => p.fut), subs: futSubs,
                     cls: pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '',
                     extra: html`<span className=${"hl-chg font-mono-data" + futStale}><span className="hl-pts">${pointsChangeFormatted}</span><span className="hl-pct">(${percentChange})</span></span>` })}
-                ${trendCell('vix', vixValue, 'hl-vix', { label: vixNightLast ? '夜盤波動率 VIX' : null, values: [...vixDay, ...vixN].map(p => p.vix), subs: vixSubs })}`;
+                ${trendCell('vix', vixValue, 'hl-vix', { label: vixNightLast ? '夜盤波動率 VIX' : null, values: [...vixDay, ...vixN].map(p => p.vix), subs: vixSubs })}
+                ${trendCell('bias', biasValue, 'hl-bias', { values: biasSession.map(p => p.bias), subs: biasSubs, cls: 'hl-bias-cell' })}`;
 
             return html`
                 <div id="app-root" className="flex flex-col min-h-screen bg-slate-50 select-none overflow-x-hidden">
@@ -1458,7 +1495,7 @@
                     </main>
                     <${SessionPanel} sessions=${sessions} live=${live} liveMarket=${(demo && demo.market) || {}} />
                     <button type="button" id="trend-btn" onClick=${() => setTrendKey('tv')}>走勢圖</button>
-                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: tvValue, fut: futValue, vix: vixValue }} tvPts=${tvPts} onClose=${closeTrend} erased=${erased} markErased=${markErased} />`}
+                    ${trendKey && html`<${TrendModal} initial=${trendKey} current=${{ tv: tvValue, fut: futValue, vix: vixValue, bias: biasLast ? `${biasWord(biasLast.bias)} ${biasText(biasLast.bias)}` : '--' }} tvPts=${tvPts} onClose=${closeTrend} erased=${erased} markErased=${markErased} />`}
                 </div>`;
         };
 
