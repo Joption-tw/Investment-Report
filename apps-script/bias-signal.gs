@@ -5,8 +5,8 @@
 //
 // 安裝（獨立的 Apps Script 專案，跟橡皮擦一樣，不放在試算表綁定的專案裡，避免 doPost 撞名）：
 //   1. script.google.com →「新專案」，專案名稱改成「多空指標接收」，把這整個檔案貼上，按儲存
-//   2. 把 setBiasKey 裡的 PUT-KEY-HERE 換成監控程式資料夾 upload.json 裡的 key（兩邊要一模一樣）
-//   3. 上方函式選單選 setBiasKey → 按「執行」→ 依畫面授權（用你自己的 Google 帳號）
+//   2. 上方函式選單選 setBiasKey → 按「執行」→ 依畫面授權（用你自己的 Google 帳號）
+//   3. 下方「執行記錄」會印出一組密碼：貼到監控程式資料夾 upload.json 的 key（兩邊要一模一樣；密碼不寫在程式碼裡）
 //   4. 「部署」→「新增部署作業」→ 類型「網頁應用程式」，執行身分「我」、存取權「所有人」→ 部署
 //   5. 把網頁應用程式網址貼到 upload.json 的 url，並把 enabled 改成 true，重新啟動監控程式
 //   6. 回試算表，會多一個「多空紀錄」分頁（可以隱藏，網站照樣讀得到）
@@ -17,9 +17,18 @@ const BIAS_HEADER    = ['記錄時間', '盤別', '多空指標', '期貨'];
 const BIAS_KEEP_DAYS = 14;                // 試算表只留 14 天；GitHub Actions 每小時存到 data/bias/<週>.json 長期保存
 const BIAS_TZ        = 'Asia/Taipei';
 
+// 第一次執行時自動產生密碼並印在執行記錄；之後再執行會印出同一組（要換密碼：先執行 resetBiasKey）
 function setBiasKey() {
-  PropertiesService.getScriptProperties().setProperty('BIAS_KEY', 'PUT-KEY-HERE');
+  const props = PropertiesService.getScriptProperties();
+  let key = props.getProperty('BIAS_KEY');
+  if (!key) { key = Utilities.getUuid(); props.setProperty('BIAS_KEY', key); }
   biasSheet_();
+  Logger.log('upload.json 的 key：' + key);
+}
+
+function resetBiasKey() {
+  PropertiesService.getScriptProperties().deleteProperty('BIAS_KEY');
+  setBiasKey();
 }
 
 function biasSheet_() {
@@ -48,7 +57,7 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return biasOut_({ ok: false, error: '格式錯誤' }); }
   const props = PropertiesService.getScriptProperties();
   const key = props.getProperty('BIAS_KEY');
-  if (!key || key === 'PUT-KEY-HERE' || body.key !== key) return biasOut_({ ok: false, error: '密碼錯誤' });
+  if (!key || body.key !== key) return biasOut_({ ok: false, error: '密碼錯誤' });
 
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
