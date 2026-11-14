@@ -225,7 +225,8 @@
             pnl:    { name: '獲利',   side: 'right', color: '#d97706' },
             price:  { name: '時價',   side: 'right', color: '#9333ea', scale: true },
             ratio:  { name: '比值',   side: 'right', color: '#ca8a04', min: 0, max: 1 },
-            margin: { name: '剩餘%',  side: 'right', color: '#6366f1', min: 0, max: 100, fmt: v => `${v}%` }
+            margin: { name: '剩餘%',  side: 'right', color: '#6366f1', min: 0, max: 100, fmt: v => `${v}%` },
+            bias:   { name: '多空',   side: 'right', color: '#7c3aed', min: -100, max: 100 }
         };
         const AXIS_KEYS = Object.keys(AXES);
         // 線的樣式跟 sample 網站一樣：平滑、2.2 粗、淡陰影；最高 / 最低點標數字（peak）
@@ -238,8 +239,19 @@
             { key: 'ba',     label: '週三時價',       axis: 'price',  color: '#ef4444', src: 'demo', z: 4, peak: { max: '#ef4444' } },
             { key: 'bb',     label: '週五時價',       axis: 'price',  color: '#10b981', src: 'demo', z: 4, peak: { max: '#10b981' } },
             { key: 'ratio',  label: '買權比值',       axis: 'ratio',  color: '#ca8a04', src: 'acc',  z: 3, d: 2 },
-            { key: 'margin', label: '保證金剩餘比率', axis: 'margin', color: '#6366f1', src: 'acc',  z: 3, unit: '%' }
+            { key: 'margin', label: '保證金剩餘比率', axis: 'margin', color: '#6366f1', src: 'acc',  z: 3, unit: '%' },
+            // 多空指標：歐大電腦上的多空監控程式每分鐘一筆（-100 極空 ~ +100 極多），每個帳號都一樣
+            { key: 'bias',   label: '多空指標',       axis: 'bias',   color: '#7c3aed', src: 'bias', z: 3, zero: true }
         ];
+        // 多空指標：每週存檔 data/bias/<週>.json（每小時存）＋試算表「多空紀錄」分頁（這一週還沒存檔的）
+        const BIAS_SHEET_URL = since => `https://docs.google.com/spreadsheets/d/${IR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('多空紀錄')}`
+                                      + `&tq=${encodeURIComponent(`select A,C where A >= '${since}'`)}`;
+        const mergeBias = (saved, rows) => {
+            const m = new Map();
+            if (saved && saved.t) saved.t.forEach((ts, k) => { const t = wallMs(ts); if (t !== null && saved.bias[k] !== null) m.set(t, saved.bias[k]); });
+            if (rows.length && rows[0][0] === '記錄時間') rows.slice(1).forEach(r => { const t = wallMs(r[0]), v = toNum(r[1]); if (t !== null && v !== null) m.set(t, v); });
+            return [...m].sort((a, b) => a[0] - b[0]).map(([t, bias]) => ({ t, bias }));
+        };
         const AREA_UP = '#f9a8d4', AREA_DOWN = '#86efac';
         // 面積從 0 畫到線：0 以上一律粉紅、0 以下一律綠（漸層在 0 的位置硬切換）
         const signFill = data => {
@@ -269,7 +281,7 @@
         const getEraseKey = () => { try { return localStorage.getItem(ERASE_KEY_STORE) || ''; } catch (e) { return ''; } };
         const setEraseKeyStore = v => { try { v ? localStorage.setItem(ERASE_KEY_STORE, v) : localStorage.removeItem(ERASE_KEY_STORE); } catch (e) {} };
 
-        const PerfChart = ({ acc, demo, range, shown, wholeWeek, hidden, eraser, onErase, onEraseEnd }) => {
+        const PerfChart = ({ acc, demo, bias = [], range, shown, wholeWeek, hidden, eraser, onErase, onEraseEnd }) => {
             const ref = useRef(null), chart = useRef(null), drawn = useRef([]), lastRange = useRef(null);
             const live = useRef({});
             live.current = { eraser, onErase, onEraseEnd };
@@ -289,7 +301,7 @@
                 const eraseAt = (x, y) => {
                     const R = 16, t0 = c.convertFromPixel({ xAxisIndex: 0 }, x - R), t1 = c.convertFromPixel({ xAxisIndex: 0 }, x + R);
                     const found = [];
-                    drawn.current.forEach(d => d.points.forEach(([t, v]) => {
+                    drawn.current.forEach(d => d.def.src !== 'bias' && d.points.forEach(([t, v]) => {   // 多空指標不給擦
                         if (t < t0 || t > t1 || v === null || v === undefined) return;
                         const [px, py] = c.convertToPixel({ seriesIndex: d.seriesIndex }, [t, v]);
                         if (Math.hypot(px - x, py - y) <= R) found.push({ def: d.def, t });
@@ -311,7 +323,7 @@
                 const rk = `${min}-${max}`;
                 if (lastRange.current === rk) { const dz = (chart.current.getOption().dataZoom || [])[1]; if (dz) zoom = [dz.start, dz.end]; }
                 lastRange.current = rk;
-                const src = { acc: acc.filter(p => p.t >= min && p.t <= max), demo: demo.filter(p => p.t >= min && p.t <= max) };
+                const src = { acc: acc.filter(p => p.t >= min && p.t <= max), demo: demo.filter(p => p.t >= min && p.t <= max), bias: bias.filter(p => p.t >= min && p.t <= max) };
                 const on = SERIES_DEFS.filter(s => shown.includes(s.key));
                 const used = AXIS_KEYS.filter(k => on.some(s => s.axis === k));
                 // 手機（含打橫：寬度雖大但高度很矮）；直向是用 1040 寬排版再縮小，圖上的字和拉桿要放大；橫向下方拉桿讓開換頁鈕
@@ -376,12 +388,12 @@
                             lineStyle: s.area ? { width: 1, color } : { width: 2.2, color, shadowBlur: 3 }, itemStyle: { color: s.area ? s.color : color }, emphasis: { disabled: true },
                             areaStyle: s.area ? { color, opacity: 0.35 } : undefined,
                             markPoint: data.length ? peakPoints(s, fmt, fontSize) : undefined,
-                            markLine: s.key === 'rate' && data.length ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined
+                            markLine: (s.key === 'rate' || s.zero) && data.length ? { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#cbd5e1', type: 'solid' }, data: [{ yAxis: 0 }] } : undefined
                         };
                     })
                 }, true);
                 drawn.current = lines;
-            }, [acc, demo, range, shown, wholeWeek, hidden, eraser, turned]);
+            }, [acc, demo, bias, range, shown, wholeWeek, hidden, eraser, turned]);
             return html`<div id="performance-chart" ref=${ref} style=${eraser ? { cursor: 'crosshair', touchAction: 'none' } : undefined}></div>`;
         };
 
@@ -422,6 +434,7 @@
             const [liveOpen, setLiveOpen] = useState(null);
             const [series, setSeries]     = useState({});   // 週 → data/series 存檔
             const [demo, setDemo]         = useState({});   // 週 → { market, series }
+            const [biasByWeek, setBias]   = useState({});   // 週 → 多空指標 [{ t, bias }]
             const [vix, setVix]           = useState(null);
             const [viewWeek, setViewWeek] = useState('');
             const [sel, setSel]           = useState(null); // 盤 0~9、'week' = 整週、null = 最新一盤
@@ -533,6 +546,8 @@
                 // 補回的週沒有每週存檔可讀：期指、週三週五時價都在補回的檔案裡
                 if (!parsed && old) parsed = { market: {}, series: old.t.map((ts, k) => ({ t: wallMs(ts), fut: old.fut[k], ba: old.ba[k], bb: old.bb[k] })) };
                 setDemo(prev => ({ ...prev, [w]: parsed }));
+                const [bs, bl] = await Promise.all([getJSON(`data/bias/${w}.json?t=${t}`), live ? getText(`${BIAS_SHEET_URL(slotOpen(w, 0).replace(/-/g, '/'))}&t=${t}`) : '']);
+                setBias(prev => ({ ...prev, [w]: mergeBias(bs, bl ? parseCSV(bl) : []) }));
             }, []);
 
             useEffect(() => {
@@ -714,7 +729,7 @@
                                 </div>`;
                         })()}
                         ${loading ? html`<div className="h-[440px] flex items-center justify-center text-slate-400 font-bold text-sm">資料同步中…</div>`
-                                  : html`<${PerfChart} acc=${accChart} demo=${demoSeries} range=${range} shown=${shown} wholeWeek=${wholeWeek}
+                                  : html`<${PerfChart} acc=${accChart} demo=${demoSeries} bias=${biasByWeek[week] || []} range=${range} shown=${shown} wholeWeek=${wholeWeek}
                                                      hidden=${hidden} eraser=${eraser} onErase=${onErase} onEraseEnd=${onEraseEnd} />`}
                         ${!loading && !acc.some(p => p.t >= range[0] && p.t <= range[1]) && html`<p className="text-center text-xs font-bold text-slate-400 -mt-2 pb-2">這一盤還沒有這個帳號的走勢資料</p>`}
                     </div>
