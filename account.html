@@ -246,12 +246,13 @@
             // 反轉訊號 = |分數| ≥ 50 發出的訊號，▲ 預期反彈（紅）、▼ 預期拉回（綠），實心 A 版、空心 B 版
             { key: 'revs',   label: '反轉分數',       axis: 'bias',   color: '#a1a1aa', src: 'bias', z: 2, sign: true },
             { key: 'rev',    label: '反轉訊號',       axis: 'bias',   color: '#dc2626', src: 'bias', z: 8, scatter: true },
-            // 模擬比值：多空指標＋反轉訊號換成「給 Joption 的參數值 p」，再換成 Joption 的買權比值中心點 0.5 − p/2（淡色帶 = 第 1 級 ±0.12）
-            { key: 'sim',    label: '模擬比值',       axis: 'ratio',  color: '#f59e0b', src: 'bias', z: 4, d: 2 }
+            // 模擬比值：多空指標＋反轉訊號換成「給 Joption 的參數值 p」，再換成 Joption 的買權比值中心點 0.5 − p/2（淡色帶 = 第 1 級 ±0.12）；
+            // 畫 5 分鐘平均的平滑曲線，顏色跟實際買權比值（金色）分開
+            { key: 'sim',    label: '模擬比值',       axis: 'ratio',  color: '#0891b2', src: 'bias', z: 4, d: 2 }
         ];
         // 照監控程式預設設定回放 Joption 參數值：平常 = 多空指標；反轉訊號跟指標相反時覆蓋 3 分鐘反向 30%；
         // 前 30 分鐘期貨走 50 點以上時逆勢訊號不採用；最大範圍 ±100（網站讀不到各台電腦的右鍵設定，一律用預設）
-        const JO_FLIP = 30, JO_HOLD = 3 * 60e3, JO_MAX = 100, SIM_BAND = '模擬比值第 1 級';
+        const JO_FLIP = 30, JO_HOLD = 3 * 60e3, JO_MAX = 100, SIM_BAND = '模擬比值第 1 級', SIM_AVG = 5 * 60e3;
         const joptionSim = pts => {
             const out = [];
             let j = 0, gapAt = 0, ov = null;
@@ -392,7 +393,18 @@
                     const f = s.field || s.key;
                     let pts = src[s.src].filter(p => !hidden(s, p.t));
                     // 反轉分數不平滑（保留尖峰）；反轉訊號畫在分數的位置（一定在 +50 以上或 -50 以下）
-                    if (s.key === 'sim') return { def: s, seriesIndex: i, points: joptionSim(bias).filter(q => q.t >= min && q.t <= max).map(q => [q.t, q.ratio, q.p, q.ov]) };
+                    if (s.key === 'sim') {
+                        // 畫 5 分鐘平均（只用之前的資料，不偷看之後），換盤重新算；滑鼠移上去仍顯示那一分鐘實際的參數值
+                        const sim = joptionSim(bias), out = [];
+                        let from = 0, sum = 0;
+                        sim.forEach((q, k) => {
+                            if (k && q.t - sim[k - 1].t > 10 * 60e3) { from = k; sum = 0; }
+                            sum += q.ratio;
+                            while (sim[from].t <= q.t - SIM_AVG) { sum -= sim[from].ratio; from++; }
+                            if (q.t >= min && q.t <= max) out.push([q.t, +(sum / (k - from + 1)).toFixed(3), q.p, q.ov, q.ratio]);
+                        });
+                        return { def: s, seriesIndex: i, points: out };
+                    }
                     if (s.key === 'revs') return { def: s, seriesIndex: i, points: pts.filter(p => p.rs !== null && p.rs !== undefined).map(p => [p.t, p.rs]) };
                     if (s.key === 'rev') return { def: s, seriesIndex: i, points: pts.filter(p => p.sa || p.sb).map(p => {
                         const d = (p.sa || p.sb) > 0 ? 1 : -1, tr = trendAt(bias, p.t);
@@ -423,17 +435,18 @@
                 // 模擬比值的第 1 級區間（±0.12）：兩條疊起來的透明線，中間塗淡橘色；畫在所有線之後，不影響其他線的編號
                 const simPts = (lines.find(l => l.def.key === 'sim') || {}).points || [];
                 const simBand = simPts.length ? [
-                    { name: SIM_BAND, type: 'line', yAxisIndex: AXIS_KEYS.indexOf('ratio'), stack: 'simband', step: 'end', symbol: 'none', silent: true, z: 1,
+                    { name: SIM_BAND, type: 'line', yAxisIndex: AXIS_KEYS.indexOf('ratio'), stack: 'simband', smooth: true, symbol: 'none', silent: true, z: 1,
                       data: simPts.map(([t, r]) => [t, +(r - 0.12).toFixed(3)]), lineStyle: { opacity: 0 }, tooltip: { show: false } },
-                    { name: SIM_BAND, type: 'line', yAxisIndex: AXIS_KEYS.indexOf('ratio'), stack: 'simband', step: 'end', symbol: 'none', silent: true, z: 1,
-                      data: simPts.map(([t]) => [t, 0.24]), lineStyle: { opacity: 0 }, areaStyle: { color: '#f59e0b', opacity: 0.12 }, tooltip: { show: false } }
+                    { name: SIM_BAND, type: 'line', yAxisIndex: AXIS_KEYS.indexOf('ratio'), stack: 'simband', smooth: true, symbol: 'none', silent: true, z: 1,
+                      data: simPts.map(([t]) => [t, 0.24]), lineStyle: { opacity: 0 }, areaStyle: { color: '#0891b2', opacity: 0.1 }, tooltip: { show: false } }
                 ] : [];
                 const tipLine = (p, at) => {
                     if (p.seriesName === SIM_BAND) return null;
                     const s = byName[p.seriesName];
                     if (s && s.key === 'sim') {
-                        const [, r, pv, ov] = p.value;
-                        return `${p.marker}模擬比值：<b>${r.toFixed(2)}</b>（參數 ${pv > 0 ? '+' : ''}${pv}${ov ? `，反轉覆蓋${ov > 0 ? '預期反彈' : '預期拉回'}` : ''}；第 1 級 ${(r - .12).toFixed(2)}～${(r + .12).toFixed(2)}）`;
+                        const [, r, pv, ov, raw] = p.value;
+                        return `${p.marker}模擬比值（5 分鐘平均）：<b>${r.toFixed(2)}</b>（第 1 級 ${(r - .12).toFixed(2)}～${(r + .12).toFixed(2)}）`
+                             + `<br>　這一分鐘：${raw.toFixed(2)}（參數 ${pv > 0 ? '+' : ''}${pv}${ov ? `，反轉覆蓋${ov > 0 ? '預期反彈' : '預期拉回'}` : ''}）`;
                     }
                     if (!s || !s.scatter) return `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], s)}</b>`;
                     if (Math.abs(p.value[0] - at) > 60e3) return null;     // 滑鼠附近 1 分鐘內沒有訊號就不顯示
@@ -479,8 +492,8 @@
                             emphasis: { scale: 1.4 }, ...revBands(s.key)
                         };
                         if (s.key === 'sim') return {
-                            name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, z: s.z, showSymbol: false, step: 'end',
-                            lineStyle: { width: 2, color: s.color, type: [6, 3] }, itemStyle: { color: s.color }, emphasis: { disabled: true }
+                            name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, z: s.z, showSymbol: false, smooth: true,
+                            lineStyle: { width: 2.2, color: s.color, shadowBlur: 3 }, itemStyle: { color: s.color }, emphasis: { disabled: true }
                         };
                         if (s.key === 'revs') return {
                             name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, z: s.z, showSymbol: false, connectNulls: true,
