@@ -1,5 +1,5 @@
 // 歐大的投資報表：「多空指標」接收程式
-// 歐大電腦上的多空監控程式每分鐘送一筆：時間、盤別、多空指標（-100 ~ +100）、期貨價，
+// 歐大電腦上的多空監控程式每分鐘送一筆：時間、盤別、多空指標（-100 ~ +100）、期貨價、反轉分數與反轉訊號，
 // 記到試算表「多空紀錄」分頁；總表頁首的「多空指標」卡片和走勢圖從這個分頁讀。
 // 只收計算後的多空指標，不收看盤軟體的原始盤面數字，那些只留在歐大自己電腦的紀錄檔。
 //
@@ -13,7 +13,7 @@
 
 const BIAS_SHEET_ID  = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
 const BIAS_TAB       = '多空紀錄';
-const BIAS_HEADER    = ['記錄時間', '盤別', '多空指標', '期貨'];
+const BIAS_HEADER    = ['記錄時間', '盤別', '多空指標', '期貨', '反轉分數', '反轉A', '反轉B'];   // 反轉：2026-11-15 加入
 const BIAS_KEEP_DAYS = 14;                // 試算表只留 14 天；GitHub Actions 每小時存到 data/bias/<週>.json 長期保存
 const BIAS_TZ        = 'Asia/Taipei';
 const BIAS_SCAN_ROWS = 1000;              // 覆蓋同一分鐘時，往回比對最近幾筆（每分鐘一筆，約 16 小時）
@@ -40,6 +40,8 @@ function biasSheet_() {
     sh.getRange('A:B').setNumberFormat('@');     // 時間存成文字，網站用 A >= '時間' 查詢
     sh.getRange(1, 1, 1, BIAS_HEADER.length).setValues([BIAS_HEADER]);
     sh.setFrozenRows(1);
+  } else if (sh.getLastColumn() < BIAS_HEADER.length) {
+    sh.getRange(1, 1, 1, BIAS_HEADER.length).setValues([BIAS_HEADER]);   // 舊的分頁補上反轉欄位標題
   }
   return sh;
 }
@@ -52,7 +54,8 @@ function doGet() {
   return biasOut_({ ok: true });
 }
 
-// body：{ key, rows: [{ t: 'yyyy/MM/dd HH:mm:ss', sess: '日盤' | '夜盤', v: -100~100, fut: 期貨價 }] }
+// body：{ key, rows: [{ t: 'yyyy/MM/dd HH:mm:ss', sess: '日盤' | '夜盤', v: -100~100, fut: 期貨價,
+//                      rs: 反轉分數 -100~100（可省略）, sa / sb: A / B 版反轉訊號 +1 反彈 / -1 拉回 / 0（可省略）}] }
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return biasOut_({ ok: false, error: '格式錯誤' }); }
@@ -70,7 +73,9 @@ function doPost(e) {
         && typeof r.fut === 'number' && r.fut > 0 && r.fut < 1e6)
       .slice(0, 1000)
       .sort((a, b) => a.t < b.t ? -1 : 1)
-      .map(r => [r.t, r.sess, Math.round(r.v), r.fut]);
+      .map(r => [r.t, r.sess, Math.round(r.v), r.fut,
+                 typeof r.rs === 'number' && r.rs >= -100 && r.rs <= 100 ? Math.round(r.rs) : '',
+                 r.sa === 1 || r.sa === -1 ? r.sa : 0, r.sb === 1 || r.sb === -1 ? r.sb : 0]);
     let added = 0, replaced = 0;
     if (rows.length) {
       // 同一分鐘只留一筆：兩台電腦都上傳、或斷線補送時，同一分鐘的舊資料直接覆蓋（以最近約 16 小時的紀錄比對）
@@ -86,7 +91,7 @@ function doPost(e) {
       rows.forEach(r => {
         const m = r[0].slice(0, 16), at = byMinute.get(m);
         if (typeof at === 'number') { sh.getRange(at, 1, 1, BIAS_HEADER.length).setValues([r]); replaced++; }
-        else if (typeof at === 'object') { at.splice(0, 4, ...r); replaced++; }   // 同一批裡同一分鐘：留最後一筆
+        else if (typeof at === 'object') { at.splice(0, r.length, ...r); replaced++; }   // 同一批裡同一分鐘：留最後一筆
         else { append.push(r); byMinute.set(m, r); }
       });
       if (append.length) sh.getRange(sh.getLastRow() + 1, 1, append.length, BIAS_HEADER.length).setValues(append);

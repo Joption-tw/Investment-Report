@@ -260,35 +260,42 @@ def save_series(snaps):
 # ── 多空指標（apps-script/bias-signal.gs 每分鐘一筆，試算表保留 14 天）：依週存到 data/bias/<週起始日>.json 長期保存 ──
 BIAS_SHEET = '多空紀錄'
 BIAS_DIR   = 'data/bias'
+# 存檔欄位 → 試算表標題；rs = A 版反轉分數（每分鐘絕對值最大的）、sa / sb = A / B 版反轉訊號（+1 反彈 / -1 拉回）
+BIAS_FIELDS = {'bias': '多空指標', 'fut': '期貨', 'rs': '反轉分數', 'sa': '反轉A', 'sb': '反轉B'}
 
 
 def save_bias(hours=30):
     since = (datetime.now(TPE) - timedelta(hours=hours)).strftime('%Y/%m/%d %H:%M:%S')
     url = (f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&headers=1'
-           f'&sheet={urllib.parse.quote(BIAS_SHEET)}&tq={urllib.parse.quote(f"select A,C,D where A >= {since!r}")}')
+           f'&sheet={urllib.parse.quote(BIAS_SHEET)}&tq={urllib.parse.quote(f"select * where A >= {since!r}")}')
     try:
         rows = list(csv.reader(io.StringIO(get(url))))
     except Exception as e:
         print('多空紀錄讀取失敗（還沒安裝的話正常）：', e); return
-    if not rows or rows[0][:2] != ['記錄時間', '多空指標']:
+    if not rows or rows[0][:1] != ['記錄時間'] or '多空指標' not in rows[0]:
         print('沒有「多空紀錄」分頁，略過'); return
+    # 用標題找欄位：反轉分數 / 反轉A / 反轉B 是 2026-11-15 才加的，舊資料沒有
+    col = {name: rows[0].index(name) for name in BIAS_FIELDS.values() if name in rows[0]}
     by_week = {}
     for r in rows[1:]:
-        if len(r) < 3 or not re.match(r'^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}$', r[0].strip()): continue
+        if not r or not re.match(r'^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}$', r[0].strip()): continue
         ts = datetime.strptime(r[0].strip(), '%Y/%m/%d %H:%M:%S').replace(tzinfo=TPE)
-        key, bias = session_of(ts), num(r[1])
-        if not key or bias is None: continue
-        by_week.setdefault(week_of(*key).isoformat(), {})[ts.strftime('%Y-%m-%d %H:%M:%S')] = (bias, num(r[2]))
+        vals = {k: num(r[col[n]]) if n in col and col[n] < len(r) else None for k, n in BIAS_FIELDS.items()}
+        key = session_of(ts)
+        if not key or vals['bias'] is None: continue
+        by_week.setdefault(week_of(*key).isoformat(), {})[ts.strftime('%Y-%m-%d %H:%M:%S')] = vals
     for week, items in by_week.items():
         path = f'{BIAS_DIR}/{week}.json'
         try:
             with open(path, encoding='utf-8') as f: old = json.load(f)
         except FileNotFoundError:
-            old = {'week': week, 't': [], 'bias': [], 'fut': []}
-        points = {t: (old['bias'][k], old['fut'][k]) for k, t in enumerate(old['t'])}
-        points.update(items)
+            old = {'week': week, 't': []}
+        points = {t: {k: (old.get(k) or [None] * len(old['t']))[i] for k in BIAS_FIELDS} for i, t in enumerate(old['t'])}
+        for t, vals in items.items():      # 試算表沒有的欄位（舊資料）不蓋掉存檔裡已經有的值
+            prev = points.get(t, {})
+            points[t] = {k: v if v is not None else prev.get(k) for k, v in vals.items()}
         times = sorted(points)
-        data = {'week': week, 't': times, 'bias': [points[t][0] for t in times], 'fut': [points[t][1] for t in times]}
+        data = {'week': week, 't': times, **{k: [points[t][k] for t in times] for k in BIAS_FIELDS}}
         if data == old: continue
         os.makedirs(BIAS_DIR, exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:

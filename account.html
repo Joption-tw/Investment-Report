@@ -241,16 +241,28 @@
             { key: 'ratio',  label: '買權比值',       axis: 'ratio',  color: '#ca8a04', src: 'acc',  z: 3, d: 2 },
             { key: 'margin', label: '保證金剩餘比率', axis: 'margin', color: '#6366f1', src: 'acc',  z: 3, unit: '%' },
             // 多空指標：歐大電腦上的多空監控程式每分鐘一筆（-100 極空 ~ +100 極多），每個帳號都一樣
-            { key: 'bias',   label: '多空指標',       axis: 'bias',   color: '#7c3aed', src: 'bias', z: 3, zero: true }
+            { key: 'bias',   label: '多空指標',       axis: 'bias',   color: '#7c3aed', src: 'bias', z: 3, zero: true, sign: true },
+            // 反轉：多空監控程式的 3 分鐘反轉訊號。反轉分數 = A 版每分鐘最強的分數，超過 +50 / 低於 -50 的那一段變色；
+            // 反轉訊號 = |分數| ≥ 50 發出的訊號，▲ 預期反彈（紅）、▼ 預期拉回（綠），實心 A 版、空心 B 版
+            { key: 'revs',   label: '反轉分數',       axis: 'bias',   color: '#a1a1aa', src: 'bias', z: 2, sign: true },
+            { key: 'rev',    label: '反轉訊號',       axis: 'bias',   color: '#dc2626', src: 'bias', z: 8, scatter: true }
         ];
+        const REV_UP = '#dc2626', REV_DOWN = '#059669';
         // 多空指標：每週存檔 data/bias/<週>.json（每小時存）＋試算表「多空紀錄」分頁（這一週還沒存檔的）
         const BIAS_SHEET_URL = since => `https://docs.google.com/spreadsheets/d/${IR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('多空紀錄')}`
-                                      + `&tq=${encodeURIComponent(`select A,C where A >= '${since}'`)}`;
+                                      + `&tq=${encodeURIComponent(`select * where A >= '${since}'`)}`;
+        // 存檔欄位 → 試算表標題（反轉分數 / 反轉A / 反轉B 是 2026-11-15 加的，舊資料沒有）
+        const BIAS_FIELDS = { bias: '多空指標', rs: '反轉分數', sa: '反轉A', sb: '反轉B' };
         const mergeBias = (saved, rows) => {
             const m = new Map();
-            if (saved && saved.t) saved.t.forEach((ts, k) => { const t = wallMs(ts); if (t !== null && saved.bias[k] !== null) m.set(t, saved.bias[k]); });
-            if (rows.length && rows[0][0] === '記錄時間') rows.slice(1).forEach(r => { const t = wallMs(r[0]), v = toNum(r[1]); if (t !== null && v !== null) m.set(t, v); });
-            return [...m].sort((a, b) => a[0] - b[0]).map(([t, bias]) => ({ t, bias }));
+            const put = (t, p) => { if (t === null || p.bias === null || p.bias === undefined) return; const o = m.get(t) || {};
+                                    m.set(t, Object.fromEntries(Object.keys(BIAS_FIELDS).map(k => [k, p[k] ?? o[k] ?? null]))); };
+            if (saved && saved.t) saved.t.forEach((ts, k) => put(wallMs(ts), Object.fromEntries(Object.keys(BIAS_FIELDS).map(f => [f, saved[f] ? saved[f][k] : null]))));
+            if (rows.length && rows[0][0] === '記錄時間') {
+                const col = Object.fromEntries(Object.entries(BIAS_FIELDS).map(([k, n]) => [k, rows[0].indexOf(n)]));
+                rows.slice(1).forEach(r => put(wallMs(r[0]), Object.fromEntries(Object.keys(BIAS_FIELDS).map(k => [k, col[k] >= 0 ? toNum(r[col[k]]) : null]))));
+            }
+            return [...m].sort((a, b) => a[0] - b[0]).map(([t, p]) => ({ t, ...p }));
         };
         const AREA_UP = '#f9a8d4', AREA_DOWN = '#86efac';
         // 面積從 0 畫到線：0 以上一律粉紅、0 以下一律綠（漸層在 0 的位置硬切換）
@@ -346,6 +358,12 @@
                     if (!shown.includes(s.key)) return { def: s, seriesIndex: i, points: [] };
                     const f = s.field || s.key;
                     let pts = src[s.src].filter(p => !hidden(s, p.t));
+                    // 反轉分數不平滑（保留尖峰）；反轉訊號畫在分數的位置（一定在 +50 以上或 -50 以下）
+                    if (s.key === 'revs') return { def: s, seriesIndex: i, points: pts.filter(p => p.rs !== null && p.rs !== undefined).map(p => [p.t, p.rs]) };
+                    if (s.key === 'rev') return { def: s, seriesIndex: i, points: pts.filter(p => p.sa || p.sb).map(p => {
+                        const d = (p.sa || p.sb) > 0 ? 1 : -1;
+                        return [p.t, d * Math.max(50, Math.abs(p.rs || 0)), d, p.sa && p.sb ? 'A、B' : p.sa ? 'A' : 'B'];
+                    }) };
                     if (s.src === 'acc') pts = despike(pts, [f]);
                     const points = smooth3(pts.map(p => [p.t, p[f]]));
                     if (!s.field) return { def: s, seriesIndex: i, points };
@@ -356,14 +374,35 @@
                     });
                     return { def: s, seriesIndex: i, points: cut };
                 });
-                const fmt = (v, s) => v === null || v === undefined ? '—' : s && s.d ? `${v.toFixed(s.d)}${s.unit || ''}` : `${Math.round(v).toLocaleString()}${s && s.unit || ''}`;
+                const fmt = (v, s) => v === null || v === undefined ? '—' : s && s.d ? `${v.toFixed(s.d)}${s.unit || ''}` : `${s && s.sign && v > 0 ? '+' : ''}${Math.round(v).toLocaleString()}${s && s.unit || ''}`;
+                // 反轉：±50 以外的區域上淡色、±50 畫虛線（掛在反轉分數線上；只開反轉訊號時掛在訊號上）
+                const revOn = shown.includes('revs') ? 'revs' : shown.includes('rev') ? 'rev' : null;
+                const revBands = key => key !== revOn ? {} : {
+                    markArea: { silent: true, data: [[{ yAxis: 50, itemStyle: { color: 'rgba(220,38,38,0.07)' } }, { yAxis: 100 }],
+                                                     [{ yAxis: -100, itemStyle: { color: 'rgba(5,150,105,0.07)' } }, { yAxis: -50 }]] },
+                    markLine: { silent: true, symbol: 'none', data: [
+                        { yAxis: 50, lineStyle: { color: REV_UP, type: 'dashed', width: 1.2 }, label: { formatter: '+50 反彈區', color: REV_UP, fontWeight: 'bold', fontSize, position: 'insideStartTop' } },
+                        { yAxis: -50, lineStyle: { color: REV_DOWN, type: 'dashed', width: 1.2 }, label: { formatter: '-50 拉回區', color: REV_DOWN, fontWeight: 'bold', fontSize, position: 'insideStartBottom' } }] }
+                };
+                const revsIndex = SERIES_DEFS.findIndex(s => s.key === 'revs');
+                const tipLine = (p, at) => {
+                    const s = byName[p.seriesName];
+                    if (!s || !s.scatter) return `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], s)}</b>`;
+                    if (Math.abs(p.value[0] - at) > 60e3) return null;     // 滑鼠附近 1 分鐘內沒有訊號就不顯示
+                    const up = p.value[2] > 0;
+                    return `<b style="color:${up ? REV_UP : REV_DOWN}">${up ? '▲ 反轉訊號：預期反彈' : '▼ 反轉訊號：預期拉回'}</b>（${p.value[3]} 版）`;
+                };
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
                     grid: mLandscape ? { left: count.left * axisW + 4, right: count.right * axisW + 4, top: 24, bottom: barBottom + 44 + (wholeWeek ? 32 : 20) }
                         : { left: count.left * axisW + 15, right: count.right * axisW + 15, top: mPortrait ? 44 : 30, bottom: mPortrait ? 110 : 70 },
                     tooltip: { show: !eraser, trigger: 'axis', axisPointer: { type: 'line' }, confine: true, textStyle: { fontSize: mPortrait ? 24 : 14 },
-                        formatter: ps => ps.length ? `<b>${mdhm(ps[0].value[0])}</b><br>` + ps.map(p => `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], byName[p.seriesName])}</b>`).join('<br>') : '' },
+                        formatter: ps => { if (!ps.length) return ''; const at = ps[0].axisValue;
+                                           return `<b>${mdhm(at)}</b><br>` + ps.map(p => tipLine(p, at)).filter(Boolean).join('<br>'); } },
+                    // 反轉分數線：+50 以上紅、-50 以下綠、中間灰
+                    visualMap: shown.includes('revs') ? [{ show: false, type: 'piecewise', seriesIndex: revsIndex, dimension: 1,
+                        pieces: [{ gte: 50, color: REV_UP }, { lte: -50, color: REV_DOWN }, { gt: -50, lt: 50, color: '#a1a1aa' }] }] : [],
                     xAxis: { type: 'time', min, max, splitLine: { show: false },
                         axisLabel: { hideOverlap: true, color: '#64748b', fontWeight: 'bold', fontSize: mPortrait ? fontSize : undefined, formatter: v => wholeWeek ? mdhm(v).replace(' ', '\n') : hhmm(v) } },
                     yAxis: AXIS_KEYS.map(k => {
@@ -381,6 +420,16 @@
                           ...(mLandscape ? { left: 92, right: 236, bottom: barBottom + 13, height: 18 } : mPortrait ? { bottom: 10, height: 44 } : { bottom: 8, height: 24 }) }
                     ],
                     series: lines.map(({ def: s, points: data }) => {
+                        if (s.scatter) return {
+                            name: s.label, type: 'scatter', yAxisIndex: AXIS_KEYS.indexOf(s.axis), z: s.z, symbolSize: mPortrait ? 30 : 18,
+                            data: data.map(([t, v, d, w]) => ({ value: [t, v, d, w], symbol: w === 'B' ? 'emptyTriangle' : 'triangle', symbolRotate: d < 0 ? 180 : 0,
+                                itemStyle: { color: d > 0 ? REV_UP : REV_DOWN, borderColor: '#fff', borderWidth: w === 'B' ? 0 : 1.5 } })),
+                            emphasis: { scale: 1.4 }, ...revBands(s.key)
+                        };
+                        if (s.key === 'revs') return {
+                            name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, z: s.z, showSymbol: false, connectNulls: true,
+                            lineStyle: { width: 1.4 }, emphasis: { disabled: true }, ...revBands(s.key)
+                        };
                         const color = s.area ? signFill(data) : s.color;
                         return {
                             name: s.label, type: 'line', yAxisIndex: AXIS_KEYS.indexOf(s.axis), data, connectNulls: !s.field,
