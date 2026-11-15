@@ -252,7 +252,18 @@
         const BIAS_SHEET_URL = since => `https://docs.google.com/spreadsheets/d/${IR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('多空紀錄')}`
                                       + `&tq=${encodeURIComponent(`select * where A >= '${since}'`)}`;
         // 存檔欄位 → 試算表標題（反轉分數 / 反轉A / 反轉B 是 2026-11-15 加的，舊資料沒有）
-        const BIAS_FIELDS = { bias: '多空指標', rs: '反轉分數', sa: '反轉A', sb: '反轉B' };
+        const BIAS_FIELDS = { bias: '多空指標', fut: '期貨', rs: '反轉分數', sa: '反轉A', sb: '反轉B' };
+        // 趨勢過濾（2026-11-15）：前 30 分鐘期貨走了 50 點以上時，逆著趨勢的反轉訊號（下跌中喊反彈、上漲中喊拉回）
+        // 命中率明顯較低，圖上畫成淡色小三角形；順勢的畫大一點
+        const TREND_TH = 50;
+        const trendAt = (pts, t) => {     // 前 30 分鐘期貨漲跌；資料不夠或跨盤回傳 null
+            let lo = 0, hi = pts.length - 1, j = -1;
+            while (lo <= hi) { const m = (lo + hi) >> 1; if (pts[m].t <= t - 30 * 60e3) { j = m; lo = m + 1; } else hi = m - 1; }
+            const k = pts.findIndex(p => p.t === t);
+            if (j < 0 || k < 0 || pts[j].fut == null || pts[k].fut == null || t - pts[j].t > 32 * 60e3) return null;
+            for (let i = j + 1; i <= k; i++) if (pts[i].t - pts[i - 1].t > 10 * 60e3) return null;   // 中間斷開（換盤）
+            return pts[k].fut - pts[j].fut;
+        };
         const mergeBias = (saved, rows) => {
             const m = new Map();
             const put = (t, p) => { if (t === null || p.bias === null || p.bias === undefined) return; const o = m.get(t) || {};
@@ -361,8 +372,9 @@
                     // 反轉分數不平滑（保留尖峰）；反轉訊號畫在分數的位置（一定在 +50 以上或 -50 以下）
                     if (s.key === 'revs') return { def: s, seriesIndex: i, points: pts.filter(p => p.rs !== null && p.rs !== undefined).map(p => [p.t, p.rs]) };
                     if (s.key === 'rev') return { def: s, seriesIndex: i, points: pts.filter(p => p.sa || p.sb).map(p => {
-                        const d = (p.sa || p.sb) > 0 ? 1 : -1;
-                        return [p.t, d * Math.max(50, Math.abs(p.rs || 0)), d, p.sa && p.sb ? 'A、B' : p.sa ? 'A' : 'B'];
+                        const d = (p.sa || p.sb) > 0 ? 1 : -1, tr = trendAt(bias, p.t);
+                        const side = tr === null || Math.abs(tr) < TREND_TH ? 0 : tr * d > 0 ? 1 : -1;   // 1 順勢、-1 逆勢、0 盤整
+                        return [p.t, d * Math.max(50, Math.abs(p.rs || 0)), d, p.sa && p.sb ? 'A、B' : p.sa ? 'A' : 'B', tr, side];
                     }) };
                     if (s.src === 'acc') pts = despike(pts, [f]);
                     const points = smooth3(pts.map(p => [p.t, p[f]]));
@@ -389,8 +401,10 @@
                     const s = byName[p.seriesName];
                     if (!s || !s.scatter) return `${p.marker}${p.seriesName}：<b>${fmt(p.value[1], s)}</b>`;
                     if (Math.abs(p.value[0] - at) > 60e3) return null;     // 滑鼠附近 1 分鐘內沒有訊號就不顯示
-                    const up = p.value[2] > 0;
-                    return `<b style="color:${up ? REV_UP : REV_DOWN}">${up ? '▲ 反轉訊號：預期反彈' : '▼ 反轉訊號：預期拉回'}</b>（${p.value[3]} 版）`;
+                    const up = p.value[2] > 0, tr = p.value[4], side = p.value[5];
+                    const trText = tr === null ? '' : `30 分鐘${tr > 0 ? '漲' : '跌'} ${Math.abs(Math.round(tr))} 點`;
+                    const sideText = side > 0 ? `<b>順勢</b>（${trText}）` : side < 0 ? `<span style="color:#94a3b8">逆勢（${trText}）・Joption 不採用</span>` : `盤整${trText ? `（${trText}）` : ''}`;
+                    return `<b style="color:${up ? REV_UP : REV_DOWN};opacity:${side < 0 ? 0.5 : 1}">${up ? '▲ 反轉訊號：預期反彈' : '▼ 反轉訊號：預期拉回'}</b>（${p.value[3]} 版）<br>　${sideText}`;
                 };
                 chart.current.setOption({
                     animation: false,
@@ -421,9 +435,11 @@
                     ],
                     series: lines.map(({ def: s, points: data }) => {
                         if (s.scatter) return {
-                            name: s.label, type: 'scatter', yAxisIndex: AXIS_KEYS.indexOf(s.axis), z: s.z, symbolSize: mPortrait ? 30 : 18,
-                            data: data.map(([t, v, d, w]) => ({ value: [t, v, d, w], symbol: w === 'B' ? 'emptyTriangle' : 'triangle', symbolRotate: d < 0 ? 180 : 0,
-                                itemStyle: { color: d > 0 ? REV_UP : REV_DOWN, borderColor: '#fff', borderWidth: w === 'B' ? 0 : 1.5 } })),
+                            name: s.label, type: 'scatter', yAxisIndex: AXIS_KEYS.indexOf(s.axis), z: s.z,
+                            // 順勢大、盤整中、逆勢小又淡
+                            data: data.map(([t, v, d, w, tr, side]) => ({ value: [t, v, d, w, tr, side], symbol: w === 'B' ? 'emptyTriangle' : 'triangle', symbolRotate: d < 0 ? 180 : 0,
+                                symbolSize: (side > 0 ? 22 : side < 0 ? 11 : 17) * (mPortrait ? 1.6 : 1),
+                                itemStyle: { color: d > 0 ? REV_UP : REV_DOWN, opacity: side < 0 ? 0.3 : 1, borderColor: '#fff', borderWidth: w === 'B' ? 0 : 1.5 } })),
                             emphasis: { scale: 1.4 }, ...revBands(s.key)
                         };
                         if (s.key === 'revs') return {
