@@ -82,6 +82,8 @@
         .hl-spark svg { display: block; width: 100%; height: 100%; overflow: visible; }
         .hl-spark polyline { fill: none; stroke-width: 2px; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
         .hl-spark i { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; }
+        .hl-spark-zero { stroke: rgba(226,232,240,.55); stroke-width: 1px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+        .hl-spark-tick { position: absolute; left: -2px; transform: translate(-100%, -50%); font-size: 10px; line-height: 1; font-weight: 700; color: #94a3b8; }
         #trend-btn { display: none; }
 
         /* 放大的走勢圖：蓋在整個畫面上（掛在 body 底下，才蓋得過手機橫向的換頁鈕） */
@@ -513,6 +515,7 @@
         const biasText = v => v === null || v === undefined ? '--' : `${v > 0 ? '+' : ''}${Math.round(v)}`;
         const biasWord = v => v > 0 ? '偏多' : v < 0 ? '偏空' : '中性';
         const biasColor = v => v > 0 ? '#f87171' : v < 0 ? '#34d399' : '#e2e8f0';
+        const BIAS_ZONE = 20, BIAS_UP = '#f87171', BIAS_DOWN = '#34d399';   // 超過 ±20 算明顯偏多／偏空，卡片和走勢圖都上色
         const TREND_URL = since => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent('兩分鐘紀錄')}`
                                  + `&tq=${encodeURIComponent(`select A,F,K where B starts with '示範帳號' and A >= '${since}'`)}&t=${Date.now()}`;
         const sessionKey = p => `${p.week}-${p.slot}`;
@@ -635,16 +638,35 @@
             return echartsLoading;
         };
 
-        const Sparkline = ({ values, color }) => {
+        // zone（多空指標用）：畫 0 軸，+zone 以上紅底、-zone 以下綠底，線也照區域變色；刻度至少包含 ±zone，0 軸一定看得到
+        const Sparkline = ({ values, color, zone }) => {
             const vs = values.filter(v => v !== null);
             if (vs.length < 2) return html`<span className="hl-spark"></span>`;
-            const lo = Math.min(...vs), span = (Math.max(...vs) - lo) || 1;
+            const lo = zone ? Math.min(...vs, -zone * 1.3) : Math.min(...vs), span = ((zone ? Math.max(...vs, zone * 1.3) : Math.max(...vs)) - lo) || 1;
             const yOf = v => 92 - (v - lo) / span * 84;
             const points = vs.map((v, i) => `${(i / (vs.length - 1) * 100).toFixed(2)},${yOf(v).toFixed(2)}`).join(' ');
-            return html`
+            const last = vs[vs.length - 1];
+            if (!zone) return html`
                 <span className="hl-spark">
                     <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points=${points} style=${{ stroke: color }} /></svg>
-                    <i style=${{ left: '100%', top: `${yOf(vs[vs.length - 1])}%`, background: color }}></i>
+                    <i style=${{ left: '100%', top: `${yOf(last)}%`, background: color }}></i>
+                </span>`;
+            const yHi = yOf(zone), yLo = yOf(-zone), y0 = yOf(0), pct = y => `${y.toFixed(2)}%`;
+            const dot = last > zone ? BIAS_UP : last < -zone ? BIAS_DOWN : color;
+            return html`
+                <span className="hl-spark hl-spark-zone">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                        <defs><linearGradient id="bias-zone-grad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="100">
+                            <stop offset=${pct(yHi)} stopColor=${BIAS_UP} /><stop offset=${pct(yHi)} stopColor=${color} />
+                            <stop offset=${pct(yLo)} stopColor=${color} /><stop offset=${pct(yLo)} stopColor=${BIAS_DOWN} />
+                        </linearGradient></defs>
+                        <rect x="0" y="0" width="100" height=${Math.max(0, yHi)} fill="rgba(248,113,113,.13)" />
+                        <rect x="0" y=${yLo} width="100" height=${Math.max(0, 100 - yLo)} fill="rgba(52,211,153,.13)" />
+                        <line x1="0" x2="100" y1=${y0} y2=${y0} className="hl-spark-zero" />
+                        <polyline points=${points} style=${{ stroke: 'url(#bias-zone-grad)' }} />
+                    </svg>
+                    <b className="hl-spark-tick" style=${{ top: pct(y0) }}>0</b>
+                    <i style=${{ left: '100%', top: `${yOf(last)}%`, background: dot }}></i>
                 </span>`;
         };
 
@@ -741,9 +763,16 @@
                         label: { color: up ? '#dc2626' : '#059669', backgroundColor: up ? '#fef2f2' : '#ecfdf5', borderColor: up ? '#fecaca' : '#a7f3d0', borderWidth: 1,
                                  borderRadius: 6, padding: mPortrait ? [6, 10] : [3, 6], position: 'inside', fontWeight: 'bold', formatter: p => fmtLeg(p.value, m.d) } };
                 };
+                // 多空指標：0 軸實線、±20 虛線，+20 以上淡紅底、-20 以下淡綠底，線也跟著變紅／綠
+                const isBias = metric === 'bias', Z = BIAS_ZONE, zl = mPortrait ? 22 : mLandscape ? 9 : 11;
+                const zLine = (y, txt, color, type) => ({ yAxis: y, lineStyle: { color, type, width: y ? 1 : 1.5 }, label: { formatter: txt, color, fontSize: zl, fontWeight: 'bold', position: 'insideEndTop' } });
+                const biasMarks = isBias ? {
+                    markLine: { silent: true, symbol: 'none', data: [zLine(0, '0', '#64748b', 'solid'), zLine(Z, `+${Z}`, '#ef4444', 'dashed'), zLine(-Z, `-${Z}`, '#10b981', 'dashed')] },
+                    markArea: { silent: true, data: [[{ yAxis: Z, itemStyle: { color: 'rgba(239,68,68,.07)' } }, { yAxis: 1000 }], [{ yAxis: -1000, itemStyle: { color: 'rgba(16,185,129,.08)' } }, { yAxis: -Z }]] } } : {};
                 chart.current.setOption({
                     animation: false,
                     textStyle: { fontFamily: 'Arial' },
+                    ...(isBias ? { visualMap: { show: false, seriesIndex: 0, dimension: 1, pieces: [{ gt: Z, color: '#ef4444' }, { lt: -Z, color: '#10b981' }, { gte: -Z, lte: Z, color: m.color }] } } : {}),
                     grid: mPortrait ? { left: 112, right: 40, top: 64, bottom: showSessions ? 96 : 60 }
                         : mLandscape ? { left: 48, right: 14, top: 18, bottom: showSessions ? 32 : 20 }
                         : { left: 62, right: 24, top: 30, bottom: showSessions ? 46 : 30 },
@@ -757,10 +786,11 @@
                         splitLine: { show: true, interval: i => starts.has(i), lineStyle: { color: '#e2e8f0' } },
                         axisLabel: { interval: i => labels[i] !== undefined, hideOverlap: true, color: '#64748b', fontWeight: 'bold', fontSize, lineHeight: fontSize + 3, formatter: (_, i) => labels[i] || '' } },
                     yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } },
-                        min: v => v.min - (v.max - v.min) * .1, max: v => v.max + (v.max - v.min) * .1,
+                        min: v => isBias ? Math.min(v.min - (v.max - v.min) * .1, -BIAS_ZONE * 1.3) : v.min - (v.max - v.min) * .1,
+                        max: v => isBias ? Math.max(v.max + (v.max - v.min) * .1, BIAS_ZONE * 1.3) : v.max + (v.max - v.min) * .1,
                         axisLabel: { color: '#64748b', fontWeight: 'bold', fontSize, showMinLabel: false, showMaxLabel: false, formatter: v => v.toLocaleString() } },
                     series: [{ name: m.label, type: 'line', data: line.map(p => p[metric]), connectNulls: false, showSymbol: false,
-                        lineStyle: { width: mPortrait ? 4 : 2, color: m.color }, itemStyle: { color: m.color }, emphasis: { disabled: true },
+                        lineStyle: { width: mPortrait ? 4 : 2, ...(isBias ? {} : { color: m.color }) }, itemStyle: { color: m.color }, emphasis: { disabled: true }, ...biasMarks,
                         markPoint: { symbol: 'circle', symbolSize: 0, label: { show: true, fontSize: mPortrait ? 26 : mLandscape ? 10 : 12 },
                                      data: [...turns.slice(1).map(legPoint), ...turns.map(turnPoint)] } }]
                 }, true);
@@ -1416,7 +1446,7 @@
             const biasValue = biasLast ? html`<span style=${{ color: biasColor(biasLast.bias) }}>${biasWord(biasLast.bias)} ${biasText(biasLast.bias)}</span>` : '--';
             const biasSubs = biasLast ? html`
                 <span>${SLOT_DEFS[biasLast.slot].label} · 更新 ${mdLabel(ymd(new Date(biasLast.t)))} ${hhmm(biasLast.t)}${biasAgeMin > 5 ? `（已 ${biasAgeMin} 分鐘沒有新資料）` : ''}</span>
-                <span>-100 極空 ~ 0 中性 ~ +100 極多</span>` : html`<span>還沒有資料（等歐大電腦的監控程式開始上傳）</span>`;
+                <span>-100 極空 ~ 0 中性 ~ +100 極多 · <b style=${{ color: BIAS_UP }}>+20 以上</b> / <b style=${{ color: BIAS_DOWN }}>-20 以下</b> 上色</span>` : html`<span>還沒有資料（等歐大電腦的監控程式開始上傳）</span>`;
             const trendCell = (key, value, valueClass, { label, values, extra, subs, cls = '' }) => html`
                 <button type="button" key=${key} onClick=${() => setTrendKey(key)} title=${`放大${TREND_METRICS[key].label}走勢圖`}
                         className=${"hl-cell hl-btn flex-1 xl:flex-none flex flex-col items-center justify-center text-center " + cls}>
@@ -1424,7 +1454,7 @@
                     <span className="hl-body">
                         <span className=${valueClass + " font-mono-data"}>${value}</span>
                         ${extra}
-                        <${Sparkline} values=${values} color=${TREND_METRICS[key].spark} />
+                        <${Sparkline} values=${values} color=${TREND_METRICS[key].spark} zone=${key === 'bias' ? BIAS_ZONE : 0} />
                     </span>
                     ${subs && html`<span className="hl-subs">${subs}</span>`}
                 </button>`;
