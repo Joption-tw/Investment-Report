@@ -602,9 +602,20 @@
         const fetchVix = (date) => fetch(date ? `${VIX_URL}?date=${date}` : VIX_URL).then(r => r.ok ? r.json() : null).catch(() => null);
         // 夜盤 VIX：期交所不公布，用監控中心照期交所編製方法自己算的（每 2 分鐘一筆，只留最近一個夜盤），訪客預覽就拿得到，不用登入
         const MON_API = 'https://script.google.com/macros/s/AKfycbz7zFm3gVFAq_-y8pxc873AeK0jAWyyrPbUJ9PL3N4vdllJ55rKnOBlbSXAP5zM99tlpQ/exec';
+        // 同學會監控中心的 VIX 橡皮擦：[線, 從, 到(真實毫秒), 值從, 值到]，跟這頁的橡皮擦共用（兩邊擦的都互相套用）
+        // 第 6 欄是 'ir' 的是監控中心從這頁「塗掉紀錄」轉過去的，這頁自己已經有，跳過
+        let monVixErased = [];
+        const monVixGone = p => {
+            if (!monVixErased.length || !p || p.vix === undefined) return false;
+            // 這頁日盤 2 分鐘取一點、監控中心每分鐘一點，前後放寬 1 分鐘、值放寬 0.3；夜盤兩邊是同一份每分鐘自算，照原範圍
+            const ms = p.t - 8 * 3600e3, line = p.night ? 'VIX夜盤自算' : 'VIX期交所', dt = p.night ? 0 : 60e3, dv = p.night ? 0 : 0.3;
+            return monVixErased.some(e => e[0] === line && ms >= e[1] - dt && ms <= e[2] + dt && p.vix >= e[3] - dv && p.vix <= e[4] + dv);
+        };
         const fetchVixNight = () => fetch(MON_API, { method: 'POST', body: JSON.stringify({ action: 'preview' }) })
             .then(r => r.ok ? r.json() : null)
             .then(j => {
+                const er = j && j.data && j.data.vix && j.data.vix.erased;
+                if (Array.isArray(er)) monVixErased = er.filter(e => Array.isArray(e) && e[5] !== 'ir');
                 const n = j && j.vixSelf && j.vixSelf.night;
                 if (!n || !n.v || !n.start) return [];
                 return n.v.map((x, i) => x === null ? null : { t: n.start + 8 * 3600e3 + i * 60e3, vix: x, night: true })
@@ -681,6 +692,8 @@
             return line ? { account: TREND_ERASE_ACC, line, t: stampOf(p.t) } : null;
         };
         const isTrendErased = (erased, metric, p) => { const it = trendEraseItem(metric, p); return !!it && erased.has(eraseKey(it.account, it.line, it.t)); };
+        // 畫圖要藏的點：這頁塗掉的 + VIX 在同學會監控中心擦掉的（還原清單只算這頁自己的）
+        const isTrendHidden = (erased, metric, p) => isTrendErased(erased, metric, p) || (metric === 'vix' && monVixGone(p));
         // 塗掉紀錄：打開頁面讀一次、之後 2 分鐘一次；這頁塗掉 / 還原的先記在本機，等試算表跟上
         const useErased = () => {
             const [logged, setLogged] = useState(() => new Set());
@@ -831,7 +844,7 @@
             const tvKeyNow = tvPts && tvPts.length ? tvKeyAt(tvPts[tvPts.length - 1].week, tvPts[tvPts.length - 1].t) : null;
             const tvAll = tvWeek && tvKeyNow ? [...tvWeek.filter(p => tvKeyAt(p.week, p.t) === tvKeyNow && p.t < tvPts[tvPts.length - 1].t), tvPts[tvPts.length - 1]] : tvPts;
             const rawSource = metric === 'vix' ? vixPts : metric === 'bias' ? biasWeek : metric === 'tv' && tvAll && tvAll.length ? tvAll : pts;
-            const source = rawSource && rawSource.filter(p => !isTrendErased(erased, metric, p));
+            const source = rawSource && rawSource.filter(p => !isTrendHidden(erased, metric, p));
             const last = source && source.length ? source[source.length - 1] : null;
             const rows = !last ? [] : range === 'week' ? source : source.filter(p => sessionKey(p) === sessionKey(last));
             const sub = !last ? '' : range === 'week' ? `本週 ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}` : `${SLOT_DEFS[last.slot].label} ${mdhm(rows[0].t)} ~ ${mdhm(last.t)}`;
@@ -1049,8 +1062,8 @@
             }, []);
             useEffect(() => {
                 const load = () => fetchVix().then(v => { const r = parseVixTicks(v); if (r.length) setVixDay(r); if (v && v.quote) setVixQ(v.quote); });
-                // 夜盤 VIX 2 分鐘一筆；日盤時段（08:45～13:45）用不到，不去問
-                const loadNight = () => { const hm = tpeNow().getUTCHours() * 100 + tpeNow().getUTCMinutes(); if (hm < 840 || hm > 1350 || !tick) fetchVixNight().then(setVixNight); };
+                // 夜盤 VIX 2 分鐘一筆；日盤時段也要問，才拿得到同學會監控中心最新的 VIX 橡皮擦
+                const loadNight = () => fetchVixNight().then(setVixNight);
                 let tick = 0;
                 load(); loadNight();
                 const timer = setInterval(() => { tick++; load(); if (tick % 2 === 0) loadNight(); }, 60000);
@@ -1428,7 +1441,7 @@
                 <span>${fut.session === 'D' ? '日盤' : '夜盤'}${futMarketOpen() ? '' : '已收盤'}，期交所報價 ${hms(fut.time)} 取得</span>`;
             // 夜盤：用自算的夜盤 VIX，比日盤收盤；日盤：期交所的，比前一交易日收盤
             // 橡皮擦塗掉的 VIX 點：小走勢線和夜盤最新值都跳過
-            const vixN = nightAfter(vixNight, vixDay).filter(p => !isTrendErased(erased, 'vix', p)), vixNightLast = vixN.length ? vixN[vixN.length - 1] : null;
+            const vixN = nightAfter(vixNight, vixDay).filter(p => !isTrendHidden(erased, 'vix', p)), vixNightLast = vixN.length ? vixN[vixN.length - 1] : null;
             const vixDayClose = vixDay.length ? vixDay[vixDay.length - 1].vix : vixQ && (vixQ.last || vixQ.ref) || null;
             const vixNum = vixNightLast ? vixNightLast.vix : vixDayClose;
             const vixValue = vixNum ? vixNum.toFixed(2) : '--';
@@ -1465,7 +1478,7 @@
                 ${trendCell('fut', futValue, 'hl-fut' + futStale, { label: futMonth ? `台指期 ${+futMonth} 月` : '台指期', values: trend.filter(p => !isTrendErased(erased, 'fut', p)).map(p => p.fut), subs: futSubs,
                     cls: pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '',
                     extra: html`<span className=${"hl-chg font-mono-data" + futStale}><span className="hl-pts">${pointsChangeFormatted}</span><span className="hl-pct">(${percentChange})</span></span>` })}
-                ${trendCell('vix', vixValue, 'hl-vix', { label: vixNightLast ? '夜盤波動率 VIX' : null, values: [...vixDay.filter(p => !isTrendErased(erased, 'vix', p)), ...vixN].map(p => p.vix), subs: vixSubs })}
+                ${trendCell('vix', vixValue, 'hl-vix', { label: vixNightLast ? '夜盤波動率 VIX' : null, values: [...vixDay.filter(p => !isTrendHidden(erased, 'vix', p)), ...vixN].map(p => p.vix), subs: vixSubs })}
                 ${trendCell('bias', biasValue, 'hl-bias', { values: biasSession.map(p => p.bias), subs: biasSubs, cls: 'hl-bias-cell' })}`;
 
             return html`
