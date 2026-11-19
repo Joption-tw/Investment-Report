@@ -671,13 +671,13 @@
         };
 
         // ===== 走勢圖橡皮擦：跟帳號頁同一個密碼、同一個「塗掉紀錄」分頁，帳號記成「走勢圖」，不影響帳號頁 =====
-        // 期指記在 fut 線，時間價值記在 ba（週三）/ bb（週五）線；VIX 的線名 Apps Script 還不收，先不開放
+        // 期指記在 fut 線，時間價值記在 ba（週三）/ bb（週五）線，VIX（日盤、自算夜盤都是）記在 vix 線
         const ERASE_KEY_STORE = 'ir-erase-key';
         const getEraseKey = () => { try { return localStorage.getItem(ERASE_KEY_STORE) || ''; } catch (e) { return ''; } };
         const setEraseKeyStore = v => { try { v ? localStorage.setItem(ERASE_KEY_STORE, v) : localStorage.removeItem(ERASE_KEY_STORE); } catch (e) {} };
         const TREND_ERASE_ACC = '走勢圖';
         const trendEraseItem = (metric, p) => {
-            const line = metric === 'fut' ? 'fut' : metric === 'tv' ? tvKeyAt(p.week, p.t) : null;
+            const line = metric === 'fut' ? 'fut' : metric === 'vix' ? 'vix' : metric === 'tv' ? tvKeyAt(p.week, p.t) : null;
             return line ? { account: TREND_ERASE_ACC, line, t: stampOf(p.t) } : null;
         };
         const isTrendErased = (erased, metric, p) => { const it = trendEraseItem(metric, p); return !!it && erased.has(eraseKey(it.account, it.line, it.t)); };
@@ -849,14 +849,14 @@
             const tab = (on, label, click) => html`<button type="button" key=${label} className="tr-tab" aria-pressed=${on} onClick=${click}>${label}</button>`;
 
             // 橡皮擦：按鈕一直顯示，不用密碼（2026-11-12 歐大決定），誰都可以塗掉 / 還原
-            const canErase = metric !== 'vix' && metric !== 'bias';
+            const canErase = metric !== 'bias';
             const [eraser, setEraser]       = useState(false);
             const [askKey, setAskKey]       = useState(false);
             const [keyInput, setKeyInput]   = useState('');
             const [eraseMsg, setEraseMsg]   = useState('');
             const [undoStack, setUndoStack] = useState([]);
             const batch = useRef(new Map());
-            useEffect(() => { if (metric === 'vix' || metric === 'bias') setEraser(false); }, [metric]);
+            useEffect(() => { if (metric === 'bias') setEraser(false); }, [metric]);
             const postErase = async (items, action) => {
                 try {
                     const r = await fetch(ERASE_API, { method: 'POST', body: JSON.stringify({ key: getEraseKey(), items: items.map(it => ({ ...it, action })) }) });
@@ -1427,7 +1427,8 @@
                 <span>漲跌是比前一交易日結算價 ${fut.ref.toLocaleString()}</span>
                 <span>${fut.session === 'D' ? '日盤' : '夜盤'}${futMarketOpen() ? '' : '已收盤'}，期交所報價 ${hms(fut.time)} 取得</span>`;
             // 夜盤：用自算的夜盤 VIX，比日盤收盤；日盤：期交所的，比前一交易日收盤
-            const vixN = nightAfter(vixNight, vixDay), vixNightLast = vixN.length ? vixN[vixN.length - 1] : null;
+            // 橡皮擦塗掉的 VIX 點：小走勢線和夜盤最新值都跳過
+            const vixN = nightAfter(vixNight, vixDay).filter(p => !isTrendErased(erased, 'vix', p)), vixNightLast = vixN.length ? vixN[vixN.length - 1] : null;
             const vixDayClose = vixDay.length ? vixDay[vixDay.length - 1].vix : vixQ && (vixQ.last || vixQ.ref) || null;
             const vixNum = vixNightLast ? vixNightLast.vix : vixDayClose;
             const vixValue = vixNum ? vixNum.toFixed(2) : '--';
@@ -1464,7 +1465,7 @@
                 ${trendCell('fut', futValue, 'hl-fut' + futStale, { label: futMonth ? `台指期 ${+futMonth} 月` : '台指期', values: trend.filter(p => !isTrendErased(erased, 'fut', p)).map(p => p.fut), subs: futSubs,
                     cls: pointsChangeNum > 0 ? 'hl-up' : pointsChangeNum < 0 ? 'hl-down' : '',
                     extra: html`<span className=${"hl-chg font-mono-data" + futStale}><span className="hl-pts">${pointsChangeFormatted}</span><span className="hl-pct">(${percentChange})</span></span>` })}
-                ${trendCell('vix', vixValue, 'hl-vix', { label: vixNightLast ? '夜盤波動率 VIX' : null, values: [...vixDay, ...vixN].map(p => p.vix), subs: vixSubs })}
+                ${trendCell('vix', vixValue, 'hl-vix', { label: vixNightLast ? '夜盤波動率 VIX' : null, values: [...vixDay.filter(p => !isTrendErased(erased, 'vix', p)), ...vixN].map(p => p.vix), subs: vixSubs })}
                 ${trendCell('bias', biasValue, 'hl-bias', { values: biasSession.map(p => p.bias), subs: biasSubs, cls: 'hl-bias-cell' })}`;
 
             return html`

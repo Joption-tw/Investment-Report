@@ -12,7 +12,7 @@
 const ERASE_SHEET_ID = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
 const ERASE_TAB      = '塗掉紀錄';
 const ERASE_HEADER   = ['記錄時間', '帳號', '線', '點時間', '動作'];
-const ERASE_LINES    = ['fut', 'pts', 'rate', 'pnl', 'ba', 'bb', 'ratio', 'margin'];
+const ERASE_LINES    = ['fut', 'pts', 'rate', 'pnl', 'ba', 'bb', 'ratio', 'margin', 'vix'];
 
 function setErasePassword() {
   PropertiesService.getScriptProperties().setProperty('ERASE_KEY', 'PUT-PASSWORD-HERE');
