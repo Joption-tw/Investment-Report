@@ -37,7 +37,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="common.js?v=20261111b"></script>
+    <script src="common.js?v=20261120"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -499,7 +499,7 @@
         const TREND_METRICS = {
             tv:  { label: '時間價值', color: '#d97706', spark: '#fde047', win: 4, note: '這一期合約的時間價值：下單程式回報值，以凱基程式為主，沒更新時用其他帳號的中位數，每 2 分鐘一筆' },
             fut: { label: '期貨指數', color: '#2563eb', spark: '#e2e8f0', win: 3, note: '數字是期交所近月台指期；曲線是下單程式每 2 分鐘的指數，兩者有價差' },
-            vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數：日盤是期交所的；期交所夜盤不公布，夜盤用同一套方法自己算（只有最近一個夜盤）' },
+            vix: { label: '波動率 VIX', color: '#0d9488', spark: '#7dd3fc', d: 2, note: '臺指選擇權波動率指數：日盤是期交所的；期交所夜盤不公布，夜盤用同一套方法自己算；跟同學會監控中心同一份' },
             bias: { label: '多空指標', color: '#7c3aed', spark: '#c4b5fd', note: '歐大電腦上的多空監控程式依選擇權盤面算出的多空指標：-100 極空 ~ 0 中性 ~ +100 極多，每分鐘一筆' }
         };
         // ===== 多空指標：試算表「多空紀錄」分頁（apps-script/bias-signal.gs 接收歐大電腦每分鐘上傳）=====
@@ -600,8 +600,7 @@
             });
         };
         const fetchVix = (date) => fetch(date ? `${VIX_URL}?date=${date}` : VIX_URL).then(r => r.ok ? r.json() : null).catch(() => null);
-        // 夜盤 VIX：期交所不公布，用監控中心照期交所編製方法自己算的（每 2 分鐘一筆，只留最近一個夜盤），訪客預覽就拿得到，不用登入
-        const MON_API = 'https://script.google.com/macros/s/AKfycbz7zFm3gVFAq_-y8pxc873AeK0jAWyyrPbUJ9PL3N4vdllJ55rKnOBlbSXAP5zM99tlpQ/exec';
+        // 夜盤 VIX：期交所不公布，用監控中心照期交所編製方法自己算的（每 2 分鐘一筆），訪客預覽就拿得到，不用登入
         // 同學會監控中心的 VIX 橡皮擦：[線, 從, 到(真實毫秒), 值從, 值到]，跟這頁的橡皮擦共用（兩邊擦的都互相套用）
         // 第 6 欄是 'ir' 的是監控中心從這頁「塗掉紀錄」轉過去的，這頁自己已經有，跳過
         let monVixErased = [];
@@ -623,8 +622,32 @@
             }).catch(() => []);
         // 夜盤接在日盤後面才用（夜盤開始時間比日盤最後一筆晚）；隔天日盤開了就換回期交所的
         const nightAfter = (night, day) => night.length && (!day.length || night[0].t > day[day.length - 1].t) ? night : [];
-        // 本週每個日盤；今天用即時的。週三夜盤剛換週、還沒有日盤時用最近一個日盤
+        // 本週每一盤的 VIX 都從同學會監控中心拿（日盤期交所、夜盤自算，跟監控中心同一份，橡皮擦清單也一起）
+        // 日盤照以前 2 分鐘一點（09:00、09:02…，以前塗掉的點才對得上），夜盤每分鐘；週三夜盤剛換週、這週還沒資料時用最近一盤
         const fetchVixWeek = async (week) => {
+            const dates = SLOT_DEFS.map(d => addDays(week, d.off));
+            const j = await fetchMonVix(addDays(dates[0], -4), dates[dates.length - 1]);
+            if (j) {
+                if (Array.isArray(j.erased)) monVixErased = j.erased.filter(e => Array.isArray(e) && e[5] !== 'ir');
+                const sessionPts = s => {
+                    const night = s.market === '夜盤', arr = night ? s.self : s.official;
+                    if (!Array.isArray(arr)) return [];
+                    return arr.map((x, i) => {
+                        if (x === null || x === undefined) return null;
+                        if (!night && (i < 15 || (i % 2 === 0 && i !== arr.length - 1))) return null;
+                        const t = s.start + 8 * 3600e3 + i * 60e3;
+                        return { t, vix: x, ...(night ? { night: true } : {}), ...slotAt(new Date(t)) };
+                    }).filter(Boolean);
+                };
+                const each = j.sessions.map(sessionPts).filter(p => p.length);
+                const all = each.flat().filter(p => p.week === week).sort((a, b) => a.t - b.t);
+                if (all.length) return all;
+                if (each.length) return each[each.length - 1];
+            }
+            return fetchVixWeekOld(week);
+        };
+        // 監控中心連不到才用：日盤 demo-performance（期交所 15 秒檔），夜盤監控中心 preview 的最近一盤
+        const fetchVixWeekOld = async (week) => {
             const today = ymd(tpeNow());
             const dates = SLOT_DEFS.filter(d => d.type === 'D').map(d => addDays(week, d.off)).filter(d => d < today);
             const [now, night, ...past] = await Promise.all([fetchVix(), fetchVixNight(), ...dates.map(d => fetchVix(d.replace(/-/g, '')))]);
@@ -1555,7 +1578,7 @@
 
             // 本週每盤的時價、百點震幅由上層（App）讀示範帳戶試算表後傳進來
             const loadMarket = useCallback(async () => {
-                const v = await fetch(VIX_URL).then(r => r.ok ? r.json() : null).catch(() => null);
+                const v = await fetchVixLatest();
                 if (v) setLiveVix(parseVix(v));
             }, []);
 

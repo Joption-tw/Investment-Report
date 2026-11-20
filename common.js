@@ -45,7 +45,8 @@ const makeDraggable = (selector, key) => {
 // ===== 資料來源 =====
 // 收完的盤：GitHub Actions（scripts/record_sessions.py）存到 data/sessions.json；各帳號走勢存到 data/series/<週>.json
 // 即時：試算表「績效表」上方總表 + 下方每 10 分鐘的快照（約保留 16 小時）
-// 百點震幅 / BA / BB / 期指：示範帳戶試算表（舊週讀 sample 的每週存檔）；VIX：demo-performance 的 /api/vix
+// 百點震幅 / BA / BB / 期指：示範帳戶試算表（舊週讀 sample 的每週存檔）
+// VIX：同學會監控中心存的每盤每分鐘 VIX（日盤期交所、夜盤自算），三個網頁同一份；監控中心連不到才用 demo-performance 的 /api/vix
 const IR_SHEET     = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
 const IR_GID       = '103299629';
 const SESSIONS_URL = 'data/sessions.json';
@@ -55,6 +56,27 @@ const SNAPS_URL    = `https://docs.google.com/spreadsheets/d/${IR_SHEET}/export?
 const DEMO_URL     = 'https://docs.google.com/spreadsheets/d/1AsY4_MJipaMp_cNLpyeXTpFGnG0FD4vWJu-SDRdvtME/export?format=csv&gid=1823639969';
 const DEMO_HISTORY = w => `https://joption-tw.github.io/sample/history/${w}.csv`;
 const VIX_URL      = 'https://demo-performance.vercel.app/api/vix';
+const MON_API      = 'https://script.google.com/macros/s/AKfycbz7zFm3gVFAq_-y8pxc873AeK0jAWyyrPbUJ9PL3N4vdllJ55rKnOBlbSXAP5zM99tlpQ/exec';
+// 監控中心的公開 VIX：{ sessions: [{ date: 'yyyy/MM/dd', market: '日盤'|'夜盤', start(真實毫秒), official: [...], self: [...] }], erased, now }
+// official（期交所，只有日盤）、self（自算）第 i 格是開盤後第 i 分鐘；日盤 08:45、夜盤 15:00 開盤
+const fetchMonVix = (from, to) => fetch(`${MON_API}?vix&from=${from}&to=${to}`)
+    .then(r => r.ok ? r.json() : null).then(j => j && j.ok && Array.isArray(j.sessions) ? j : null).catch(() => null);
+// 最近一個日盤轉成 /api/vix 的格式 { tradeDay, ticks: [['HHMMSS', v]], quote: { ref } }，參考價 = 前一個日盤的收盤；期交所 VIX 09:00 才開始算
+const monVixLatestDay = (j) => {
+    const days = ((j && j.sessions) || []).filter(s => s.market === '日盤' && Array.isArray(s.official) && s.official.some(x => x !== null));
+    if (!days.length) return null;
+    const s = days[days.length - 1], prev = days[days.length - 2];
+    const lastOf = a => { for (let i = a.length - 1; i >= 0; i--) if (a[i] !== null) return a[i]; return null; };
+    const hms = i => { const m = 525 + i; return String(Math.floor(m / 60)).padStart(2, '0') + String(m % 60).padStart(2, '0') + '00'; };
+    return { tradeDay: s.date.replace(/\//g, ''), quote: { ref: prev ? lastOf(prev.official) : null },
+             ticks: s.official.map((x, i) => x === null || i < 15 ? null : [hms(i), x]).filter(Boolean) };
+};
+// 每盤績效表用的今天（最近一個日盤）VIX
+const fetchVixLatest = async () => {
+    const today = ymd(tpeNow());
+    const v = monVixLatestDay(await fetchMonVix(addDays(today, -10), today));
+    return v || fetch(VIX_URL).then(r => r.ok ? r.json() : null).catch(() => null);
+};
 
 // ===== 帳號網址：account.html?id=<代號>；home: false 的帳號頁不顯示「← 總表」=====
 const ACCOUNTS = [
