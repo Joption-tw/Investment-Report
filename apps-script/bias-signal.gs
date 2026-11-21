@@ -63,6 +63,26 @@ function doPost(e) {
   const key = props.getProperty('BIAS_KEY');
   if (!key || body.key !== key) return biasOut_({ ok: false, error: '密碼錯誤' });
 
+  // 多空下單機共用參數（2026-11-21 加入）：任一台按「存檔」上傳，其他台按「更新參數」或開程式時下載
+  //   { key, action: 'set_settings', at: '2026-11-21 15:19:57', from: 電腦名稱, ver: 版本, settings: {…} }
+  //   { key, action: 'get_settings' } → { ok, doc: { at, from, ver, settings } | null }
+  if (body.action === 'set_settings') {
+    if (!body.settings || typeof body.settings !== 'object' || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(body.at || '')) {
+      return biasOut_({ ok: false, error: '參數格式錯誤' });
+    }
+    const doc = JSON.stringify({ at: body.at, from: String(body.from || '').slice(0, 40), ver: String(body.ver || '').slice(0, 10),
+                                 settings: body.settings });
+    if (doc.length > 8500) return biasOut_({ ok: false, error: '參數太大' });
+    const lk = LockService.getScriptLock();
+    lk.waitLock(15000);
+    try { props.setProperty('TRADER_SETTINGS', doc); } finally { lk.releaseLock(); }
+    return biasOut_({ ok: true, at: body.at });
+  }
+  if (body.action === 'get_settings') {
+    const doc = props.getProperty('TRADER_SETTINGS');
+    return biasOut_({ ok: true, doc: doc ? JSON.parse(doc) : null });
+  }
+
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
