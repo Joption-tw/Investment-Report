@@ -537,9 +537,11 @@ const TV_REJECT = 0.12;               // 時間價值：偏離前 5 筆正常值
 let TV_LOWN = 5;                      // 膨脹率的最低值 = 之前最低 N 點的平均（畫面上可改，會記住）
 try { const n = parseInt(localStorage.getItem('acctChart11LowN')); if (n >= 1 && n <= 999) TV_LOWN = n; } catch (e) {}
 // 膨脹率 = (目前值 − 到目前為止最低 N 點平均) ÷ 最低 N 點平均
-function calcInflation(clean) {
-  const low = [];                     // 到目前為止最低的 N 個值（由小到大）
-  return clean.map(v => {
+// 換月（cidx 合約不同）時最低值重新起算：新合約的時間價值本來就比較高，不能拿舊合約的低點來比
+function calcInflation(clean, cidx) {
+  let low = [];                       // 這個合約到目前為止最低的 N 個值（由小到大）
+  return clean.map((v, i) => {
+    if (cidx && i > 0 && cidx[i] !== cidx[i - 1]) low = [];
     if (v === null) return null;
     let k = low.findIndex(x => v < x); if (k < 0) k = low.length;
     if (k < TV_LOWN) { low.splice(k, 0, v); if (low.length > TV_LOWN) low.pop(); }
@@ -610,6 +612,11 @@ const DAILY = {
   '20261109': [29, 16, 16, 6045, 5799, 26.4, 110602.39, 110821.99, ''],
   '20261110': [17, 12, 12, 3829, 3722, 19.8, 110821.99, 110909.19, ''],
   '20261111': [25, 14, 14, 3861, 3754, 23.1, 110909.19, 110993.09, ''],
+  // 11/12～11/19 沒有實單（11/12 下午～11/13 早上是虛擬帳號，總資金一直是 110,993.09），所以不列
+  // 11/20、11/23 的 Joption 記錄檔已經被覆蓋：成交筆數查不到填 null；買口數 = 手續費 ÷ 1.65；
+  // 11/20 權利金只剩淨額（= 淨損益 + 手續費），收入欄填淨額、支出填 0；收盤已全部平倉，所以賣口數 = 買口數
+  '20261120': [null, 26, 26, 226, 0, 42.9, 110993.09, 111176.19, '換 12 月合約；筆數查不到'],
+  '20261123': [null, null, 30, 6884, 6787, 49.5, 111176.19, 111223.69, '收盤仍有留倉；筆數查不到'],
 };
 // 當天盤中（09:15~15:05）券商回報的「占用保證金」最大值：'年月日': [最大保證金, 當時總資金, 時間]；使用% = 最大保證金 ÷ 當時總資金
 const DAILY_MARGIN = {
@@ -634,6 +641,8 @@ const DAILY_MARGIN = {
   '20261109': [66651.70, 115814.39, '09:38'],
   '20261110': [52319.94, 114353.99, '11:29'],
   '20261111': [59097.12, 114770.19, '13:14'],
+  '20261120': [72870.44, 110866.09, '10:38'],   // 11/20、11/23 沒有券商回報，用帳務檔 帳戶總市值 − 可用保證金 估算
+  '20261123': [59004.85, 111248.79, '13:51'],
 };
 // 當日淨損益（以帳戶為準）= 14:57~15:00 的平均帳戶總市值 − 09:30~09:33 的平均帳戶總市值；要先載入檔案才算得出來
 // 盤中（14:57~15:00 還沒有資料）改用最新一筆帳戶總市值 − 09:30~09:33 平均，live = true；上面 PNL 的成交明細只當參考，顯示在分時圖彈窗裡
@@ -1048,6 +1057,8 @@ function loadTable(table, name) {
     }
   }
   // 時間價值：(1) 過濾很不準的點 (2) 膨脹率 = (目前值 − 之前最低 5 點平均) ÷ 之前最低 5 點平均
+  const cidx = rows.map(r => contractIdx(r.ms));          // 每一列在做哪個合約（換月的地方要重新起算）
+  const rollAt = cidx.map((c, i) => i > 0 && c !== cidx[i - 1] ? i : -1).filter(i => i >= 0);
   const tv = cols['時間價值'];
   let tvDropped = 0;
   if (tv) {
@@ -1055,6 +1066,7 @@ function loadTable(table, name) {
     const clean = tv.slice();
     let ok = [], pend = [], last = null; // ok：最近 5 筆正常值；pend：連續被判定不準的列；last：上一筆原始值
     for (let i = 0; i < tv.length; i++) {
+      if (i > 0 && cidx[i] !== cidx[i - 1]) { ok = []; pend = []; last = null; }   // 換月：時間價值整段跳高是正常的，不當成不準的點
       const v = tv[i];
       if (v === null) continue;
       const same = v === last; last = v;
@@ -1074,7 +1086,7 @@ function loadTable(table, name) {
     }
     tvDropped = clean.filter((v, i) => v === null && tv[i] !== null).length;
     cols['時間價值'] = clean;
-    cols['時價膨脹率'] = calcInflation(clean);
+    cols['時價膨脹率'] = calcInflation(clean, cidx);
   }
   applyErase();
   if (!tw) cols['波動率(新浪)'] = sinaVals(rows);           // 新浪價平 IV 依分鐘對到每一列（之後每分鐘重新讀檔時更新）
@@ -1095,7 +1107,7 @@ function loadTable(table, name) {
   hoverIdx = null;
   $('drop').classList.add('hidden'); $('main').classList.remove('hidden');
   $('fileTag').textContent = (name || '帳務資訊').replace(/\.(csv|xlsx|txt)$/i, '').replace(/^AccountInfo_100-$/, '大陸帳號');
-  $('subtitle').textContent = `${rows[0].full} ～ ${rows[rows.length - 1].full} · 共 ${rows.length.toLocaleString()} 筆` + (offHours ? ` · 已略過非交易時間（午休、盤前盤後）${offHours} 筆` : '') + (tvDropped ? ` · 時間價值已濾掉 ${tvDropped} 筆不準的數字` : '') + (closeDropped ? ` · 期貨指數已濾掉尾盤跳點 ${closeDropped} 筆` : '') + (mvFixed ? ` · 帳戶總市值已修正 ${mvFixed} 筆跳針` : '') + (erasedN ? ` · 手動擦掉 ${erasedN} 點` : '') + baseNote;
+  $('subtitle').textContent = `${rows[0].full} ～ ${rows[rows.length - 1].full} · 共 ${rows.length.toLocaleString()} 筆` + (offHours ? ` · 已略過非交易時間（午休、盤前盤後）${offHours} 筆` : '') + (tvDropped ? ` · 時間價值已濾掉 ${tvDropped} 筆不準的數字` : '') + rollAt.map(i => ` · ${rows[i].md} ${rows[i].hm} 起換 ${cidx[i] % 12 + 1} 月合約，時間價值與膨脹率最低值重新起算`).join('') + (closeDropped ? ` · 期貨指數已濾掉尾盤跳點 ${closeDropped} 筆` : '') + (mvFixed ? ` · 帳戶總市值已修正 ${mvFixed} 筆跳針` : '') + (erasedN ? ` · 手動擦掉 ${erasedN} 點` : '') + baseNote;
   document.title = '50ETF期權績效表';
   $('lowN').value = TV_LOWN;
   $('lowBar').classList.toggle('hidden', !series.some(s => s.name === '時價膨脹率'));
@@ -1278,10 +1290,10 @@ function buildDailyTable() {
   $('dailyBody').innerHTML = keys.map((k, i) => {
     const [n, s, b, pin, pout, fee, start, , note] = DAILY[k], v = nets[i], pr = pin - pout;
     const wd = WD[new Date(+k.slice(0, 4), +k.slice(4, 6) - 1, +k.slice(6)).getDay()];
-    T.n += n; T.s += s; T.b += b; T.pin += pin; T.pout += pout; T.fee += fee; T.net += v;
+    T.n += n || 0; T.s += s || 0; T.b += b || 0; T.pin += pin; T.pout += pout; T.fee += fee; T.net += v;
     if (v > 0) win++; else if (v < 0) loss++;
     const cls = v === best && v > 0 ? 'best' : v === worst && v < 0 ? 'worst' : '';
-    return `<tr${cls ? ` class="${cls}"` : ''}><td>${md(k)}${note ? `<small>${note}</small>` : ''}</td><td>${wd}</td><td>${n}</td><td>${s} / ${b}</td>` +
+    return `<tr${cls ? ` class="${cls}"` : ''}><td>${md(k)}${note ? `<small>${note}</small>` : ''}</td><td>${wd}</td><td>${n ?? '--'}</td><td>${s ?? '--'} / ${b ?? '--'}</td>` +
       (mg => mg ? `<td>${m2(mg[0])}<small>${mg[2]}</small></td><td class="${mg[0] / mg[1] >= 0.9 ? 'mhi' : ''}">${(mg[0] / mg[1] * 100).toFixed(1)}%</td>` : '<td>--</td><td>--</td>')(DAILY_MARGIN[k]) +
       `<td class="${pc(pr)}">${sgn(pr)}</td><td>${m2(fee)}</td>` +
       `<td class="${pc(v)}">${sgn(v)}</td><td>${m2(start)}</td><td class="${pc(v)}">${fmtPct(v / start * 100)}</td></tr>`;
@@ -1492,11 +1504,31 @@ loadSina();
 // 剩餘天數：到正在做的合約到期日還有幾天（日曆天）。上證 50ETF 期權每月第 4 個星期三到期（遇假日交易所會順延，這裡沒算）
 // 到期前 ROLL_DAYS 天內改算下個月的合約（10/26 離 10 月合約到期只剩 2 天，實際已經在做 11 月）
 const ROLL_DAYS = 7;
+// 實際換月：'新合約月份(YYYYMM)': '換倉完成的時間'，寫 'YYYYMMDD' 或 'YYYYMMDD HH:MM'（只寫日期 = 當天開盤就算新合約）
+// 有寫的月份以這裡為準：剩餘天數／到期日、時間價值的過濾、膨脹率的最低值，都從這個時間點起改用新合約重新起算
+// 沒寫的月份照上面 ROLL_DAYS 規則自動換；下次換月照格式往下加一行
+const ROLL_AT = {
+  '202612': '20261120',   // 11/20 換到 12 月合約（12/23 到期）
+};
 const expiryOf = (y, m) => Date.UTC(y, m, 22 + (10 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7);
+const rollMs = at => { const m = String(at).match(/^(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}):(\d{2}))?/); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)) : null; };
+// 某個時間點（列的 ms）正在做哪個合約：回傳 年 × 12 + 月（0 起算）
+function contractIdx(ms) {
+  const d = new Date(ms), y = d.getUTCFullYear(), m = d.getUTCMonth(), day = Date.UTC(y, m, d.getUTCDate());
+  let c = y * 12 + m + ((expiryOf(y, m) - day) / 86400000 <= ROLL_DAYS ? 1 : 0);
+  for (const [ym, at] of Object.entries(ROLL_AT)) {
+    const t = rollMs(at), ci = +ym.slice(0, 4) * 12 + +ym.slice(4) - 1;
+    if (t == null) continue;
+    if (ms >= t && c < ci) c = ci;              // 比規則早換
+    else if (ms < t && c === ci) c = ci - 1;    // 規則說該換了，但實際還沒換
+  }
+  return c;
+}
 function contractOf(key) {
   const k = parseInt(key), y = k / 10000 | 0, m = (k / 100 | 0) % 100 - 1, day = Date.UTC(y, m, k % 100);
-  const t = new Date(Date.UTC(y, m + ((expiryOf(y, m) - day) / 86400000 <= ROLL_DAYS ? 1 : 0), 1));
-  return { day, exp: expiryOf(t.getUTCFullYear(), t.getUTCMonth()), month: t.getUTCMonth() + 1 };
+  const c = contractIdx(day + 86399000);        // 以當天收盤時的合約為準（換月當天就顯示新合約）
+  const cy = Math.floor(c / 12), cm = c % 12;
+  return { day, exp: expiryOf(cy, cm), month: cm + 1 };
 }
 function daysLeft(key) { const c = contractOf(key); return Math.round((c.exp - c.day) / 86400000); }
 function contractNote(key) { const c = contractOf(key), e = new Date(c.exp); return `${c.month}月合約，${e.getUTCMonth() + 1}/${e.getUTCDate()} 到期`; }
