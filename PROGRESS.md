@@ -9,10 +9,10 @@ https://joption-tw.github.io/Investment-Report/ ：總表 `index.html`、單一�
   - 資料：示範帳戶試算表「資料收集」分頁（gid 710415505）A～I 欄。C 這期週三、F 前一期、G 前兩期；E 這期週五、H 前一期、I 前兩期。欄名（TX4、TXY…）每週換，直接讀表頭。日期由 `slotAt().week` 推算：週三 +7、週五 +9，前期往前 7 天。
   - 外觀照同學會監控中心：每盤一樣寬，「剩 N 盤」按鈕（圓點是兩份合約現在在哪一盤），拉桿縮放，線可以個別開關（存在 localStorage `tvt-hide`）。
   - 橡皮擦：只有監控中心開通、有橡皮擦權限的人能用。在頁上輸入 E-mail 登入，通行證存 `joption-monitor-token`。紀錄在監控中心 Apps Script，`kind: 'tv'` 存 `demoTvErase:<週>`。按住劃過去擦，一次只擦第一條碰到的線，這期優先。
-  - **Apps Script 要部署新版才存得進去**（本機 `joption-monitor/監控中心網頁資料.gs` 已改：`DEMO_TV_SERIES` 和 `kind === 'tv'`）。沒部署前，擦了會顯示「沒有存到」。
+  - 伺服器端：監控中心 Apps Script 47 版（11/24 部署）加了 `DEMO_TV_SERIES` 和 `kind === 'tv'`，實測擦、復原正常。
 
 ## 重要做法
 - 帳號頁自己的橡皮擦（第 1 頁走勢圖）是另一套：存在投資報表試算表「塗掉紀錄」，誰都能擦（11/12 歐大決定）。第 3 頁的橡皮擦要權限（11/24 歐大決定），兩套別混在一起。
 
 ## 下一步
-- 部署監控中心 Apps Script 新版，讓第 3 頁的橡皮擦存得進去。
+- 沒有待辦。
