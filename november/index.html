@@ -168,6 +168,8 @@
   .sheet-head h2 { margin: 0; font-size: 16px; font-weight: 900; color: #facc15; letter-spacing: -.2px; }
   .sheet-head h2 em { font-style: normal; color: #fff; }
   .sheet-head span { font-size: 11px; font-weight: 700; color: #94a3b8; }
+  .monthPick { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; color: #94a3b8; }
+  .monthPick select { background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 13px; font-weight: 900; cursor: pointer; }
   .tblWrap { overflow-x: auto; }
   .sheet table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
   .sheet th { padding: 9px 8px; background: #1e293b; color: #cbd5e1; border: 1px solid #334155; font-size: 11px; font-weight: 900; white-space: nowrap; text-align: center; }
@@ -388,6 +390,7 @@
           <span class="zoneOpt">｜ 膨脹率 ≤ <input type="number" id="zLo" step="0.5"> % 顯示 <input type="color" id="zcLo">
           　≥ <input type="number" id="zHi" step="0.5"> % 顯示 <input type="color" id="zcHi">
           <button id="zReset" title="回到 2%／8% 和預設顏色">預設</button></span></div>
+        <button class="btn pivot" id="btnOverlay" title="看單一盤時，把上個月合約「剩餘天數相同」那天的線按時間疊成虛線（快捷鍵 O）">⇆ 疊上月同期</button>
         <button class="btn pivot" id="btnPivot" title="標出相對高點▲與相對低點▼（快捷鍵 P）">▲▼ 高低點</button>
         <button class="btn erase" id="btnErase" title="手動擦掉不合理的數字（快捷鍵 E）">🧽 橡皮擦</button>
         <button class="btn" id="btnPng">存成圖片</button>
@@ -413,7 +416,7 @@
 
   <div id="page-tables">
     <section class="sheet" id="dailyCard">
-      <div class="sheet-head"><h2>每日損益表<em>（實單）</em></h2><span id="dailyRange"></span></div>
+      <div class="sheet-head"><h2>每日損益表<em>（實單）</em></h2><span id="dailyRange"></span><label class="monthPick">合約月份<select id="dailyMonth"></select></label></div>
       <div class="tblWrap">
         <table><thead><tr><th>日期</th><th>星期</th><th>成交筆數</th><th>賣／買口數</th><th>最大保證金</th><th>保證金使用%</th><th>權利金淨收</th><th>手續費</th><th>淨損益</th><th>日初資金</th><th>報酬率</th></tr></thead>
           <tbody id="dailyBody"></tbody></table>
@@ -1280,9 +1283,53 @@ function buildVolTable() {
   }).join('');
 }
 buildVolTable();
+// 剩餘天數：到正在做的合約到期日還有幾天（日曆天）。上證 50ETF 期權每月第 4 個星期三到期（遇假日交易所會順延，這裡沒算）
+// 到期前 ROLL_DAYS 天內改算下個月的合約（10/26 離 10 月合約到期只剩 2 天，實際已經在做 11 月）
+const ROLL_DAYS = 7;
+// 實際換月：'新合約月份(YYYYMM)': '換倉完成的時間'，寫 'YYYYMMDD' 或 'YYYYMMDD HH:MM'（只寫日期 = 當天開盤就算新合約）
+// 有寫的月份以這裡為準：剩餘天數／到期日、時間價值的過濾、膨脹率的最低值，都從這個時間點起改用新合約重新起算
+// 沒寫的月份照上面 ROLL_DAYS 規則自動換；下次換月照格式往下加一行
+const ROLL_AT = {
+  '202612': '20261120 10:12',   // 11/20 換到 12 月合約（12/23 到期）；帳務檔的時間價值 10:12 才從 11 月（0.076）跳到 12 月（0.364）
+};
+const expiryOf = (y, m) => Date.UTC(y, m, 22 + (10 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7);
+const rollMs = at => { const m = String(at).match(/^(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}):(\d{2}))?/); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)) : null; };
+// 某個時間點（列的 ms）正在做哪個合約：回傳 年 × 12 + 月（0 起算）
+function contractIdx(ms) {
+  const d = new Date(ms), y = d.getUTCFullYear(), m = d.getUTCMonth(), day = Date.UTC(y, m, d.getUTCDate());
+  let c = y * 12 + m + ((expiryOf(y, m) - day) / 86400000 <= ROLL_DAYS ? 1 : 0);
+  for (const [ym, at] of Object.entries(ROLL_AT)) {
+    const t = rollMs(at), ci = +ym.slice(0, 4) * 12 + +ym.slice(4) - 1;
+    if (t == null) continue;
+    if (ms >= t && c < ci) c = ci;              // 比規則早換
+    else if (ms < t && c === ci) c = ci - 1;    // 規則說該換了，但實際還沒換
+  }
+  return c;
+}
+function contractOf(key) {
+  const k = parseInt(key), y = k / 10000 | 0, m = (k / 100 | 0) % 100 - 1, day = Date.UTC(y, m, k % 100);
+  const c = contractIdx(day + 86399000);        // 以當天收盤時的合約為準（換月當天就顯示新合約）
+  const cy = Math.floor(c / 12), cm = c % 12;
+  return { day, exp: expiryOf(cy, cm), month: cm + 1 };
+}
+function daysLeft(key) { const c = contractOf(key); return Math.round((c.exp - c.day) / 86400000); }
+function contractNote(key) { const c = contractOf(key), e = new Date(c.exp); return `${c.month}月合約，${e.getUTCMonth() + 1}/${e.getUTCDate()} 到期`; }
+// 每日損益表按「合約月份」分期：預設只列正在做的合約（本期），下拉選單可以看以前的月份或全部
+let dailyMonth = null;                       // null = 本期；'all' = 全部；數字 = contractIdx
+const dayContract = k => contractIdx(Date.UTC(+k.slice(0, 4), +k.slice(4, 6) - 1, +k.slice(6)) + 86399000);
+const nowContract = () => { const d = new Date(); return contractIdx(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes())); };
 function buildDailyTable() {
-  const keys = Object.keys(DAILY).sort();
-  if (!keys.length) { $('dailyCard').classList.add('hidden'); return; }
+  const allKeys = Object.keys(DAILY).sort();
+  if (!allKeys.length) { $('dailyCard').classList.add('hidden'); return; }
+  const L0 = liveToday(), cur = L0 ? dayContract(L0.key) : nowContract();
+  const months = [...new Set([cur, ...allKeys.map(dayContract)])].sort((a, b) => b - a);
+  const sel = dailyMonth === 'all' ? 'all' : months.includes(dailyMonth) ? dailyMonth : cur;
+  const mName = c => `${c % 12 + 1}月`, expTxt = c => (e => `${e.getUTCMonth() + 1}/${e.getUTCDate()} 到期`)(new Date(expiryOf(Math.floor(c / 12), c % 12)));
+  const pick = $('dailyMonth');
+  pick.innerHTML = months.map(c => `<option value="${c}">${mName(c)}合約${c === cur ? '（本期）' : ''}</option>`).join('') + '<option value="all">全部月份</option>';
+  pick.value = String(sel);
+  pick.onchange = () => { dailyMonth = pick.value === 'all' ? 'all' : +pick.value; buildDailyTable(); };
+  const keys = sel === 'all' ? allKeys : allKeys.filter(k => dayContract(k) === sel);
   const m2 = n => fmtMoney(n), net = k => Math.round((DAILY[k][7] - DAILY[k][6]) * 100) / 100;
   const nets = keys.map(net), best = Math.max(...nets), worst = Math.min(...nets);
   const pc = n => n > 0 ? 'pu' : n < 0 ? 'pd' : '';
@@ -1304,7 +1351,7 @@ function buildDailyTable() {
     (ms => ms.length ? `<td>最高 ${m2(Math.max(...ms.map(x => x[0])))}</td><td>最高 ${Math.max(...ms.map(x => x[0] / x[1] * 100)).toFixed(1)}%</td>` : '<td></td><td></td>')(keys.map(k => DAILY_MARGIN[k]).filter(Boolean)) +
     `<td class="${pc(T.pin - T.pout)}">${sgn(T.pin - T.pout)}</td><td>${m2(T.fee)}</td><td class="${pc(T.net)}">${sgn(Math.round(T.net * 100) / 100)}</td><td></td><td></td></tr>`;
   // 今天的即時損益：放在合計上面，不算進合計（收盤後補進 DAILY 才算）
-  const L = liveToday();
+  const L = L0 && (sel === 'all' || dayContract(L0.key) === sel) ? L0 : null;
   if (L) {
     const wd = WD[new Date(+L.key.slice(0, 4), +L.key.slice(4, 6) - 1, +L.key.slice(6)).getDay()];
     const liveRow = `<tr class="live"><td>${md(L.key)}<small>${L.live ? `盤中 ${L.at}` : '收盤，待補券商數字'}</small></td><td>${wd}</td><td>${L.fills ?? '--'}</td><td>${L.fills != null ? `${L.sellLots} / ${L.buyLots}` : '--'}</td>` +
@@ -1316,7 +1363,8 @@ function buildDailyTable() {
       `<td class="${pc(L.sum)}" title="${L.how}">${sgn(L.sum)}</td><td>${m2(L.start)}</td><td class="${pc(L.sum)}">${fmtPct(L.pct)}</td></tr>`;
     $('dailyBody').innerHTML = $('dailyBody').innerHTML.replace('<tr class="sum">', liveRow + '<tr class="sum">');
   }
-  $('dailyRange').textContent = `${md(keys[0])}～${md(keys[keys.length - 1])}　${keys.length} 個交易日　賺 ${win} 天、賠 ${loss} 天　累計 ${sgn(Math.round(T.net * 100) / 100)} 元` +
+  $('dailyRange').textContent = (sel === 'all' ? '' : `${mName(sel)}合約（${expTxt(sel)}）　`) +
+    (keys.length ? `${md(keys[0])}～${md(keys[keys.length - 1])}　${keys.length} 個交易日　賺 ${win} 天、賠 ${loss} 天　累計 ${sgn(Math.round(T.net * 100) / 100)} 元` : '還沒有收盤結算的交易日') +
     (L ? `　｜　今天 ${md(L.key)} ${L.live ? `盤中 ${L.at}` : '收盤'}：${sgn(L.sum)} 元（${fmtPct(L.pct)}）` : '');
   $('dailyNote').textContent = '淨損益 = 券商「總資金 − 日初資金」，已和逐筆成交的權利金、手續費核對。收盤仍有留倉的日子，淨損益只含現金進出，不含持倉浮動盈虧。報酬率分母為當日日初資金（不受入金影響）。最大保證金 = 盤中券商回報的占用保證金最高值（小字是時間），使用% = 最大保證金 ÷ 當時總資金，90% 以上標紅。';
 }
@@ -1503,37 +1551,6 @@ $('sinaDays').onclick = e => {
 };
 loadSina();
 // 新浪、即時帳務、CSV 都由同步鈕的倒數（tick → syncNow）每分鐘一起載入
-// 剩餘天數：到正在做的合約到期日還有幾天（日曆天）。上證 50ETF 期權每月第 4 個星期三到期（遇假日交易所會順延，這裡沒算）
-// 到期前 ROLL_DAYS 天內改算下個月的合約（10/26 離 10 月合約到期只剩 2 天，實際已經在做 11 月）
-const ROLL_DAYS = 7;
-// 實際換月：'新合約月份(YYYYMM)': '換倉完成的時間'，寫 'YYYYMMDD' 或 'YYYYMMDD HH:MM'（只寫日期 = 當天開盤就算新合約）
-// 有寫的月份以這裡為準：剩餘天數／到期日、時間價值的過濾、膨脹率的最低值，都從這個時間點起改用新合約重新起算
-// 沒寫的月份照上面 ROLL_DAYS 規則自動換；下次換月照格式往下加一行
-const ROLL_AT = {
-  '202612': '20261120',   // 11/20 換到 12 月合約（12/23 到期）
-};
-const expiryOf = (y, m) => Date.UTC(y, m, 22 + (10 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7);
-const rollMs = at => { const m = String(at).match(/^(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}):(\d{2}))?/); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)) : null; };
-// 某個時間點（列的 ms）正在做哪個合約：回傳 年 × 12 + 月（0 起算）
-function contractIdx(ms) {
-  const d = new Date(ms), y = d.getUTCFullYear(), m = d.getUTCMonth(), day = Date.UTC(y, m, d.getUTCDate());
-  let c = y * 12 + m + ((expiryOf(y, m) - day) / 86400000 <= ROLL_DAYS ? 1 : 0);
-  for (const [ym, at] of Object.entries(ROLL_AT)) {
-    const t = rollMs(at), ci = +ym.slice(0, 4) * 12 + +ym.slice(4) - 1;
-    if (t == null) continue;
-    if (ms >= t && c < ci) c = ci;              // 比規則早換
-    else if (ms < t && c === ci) c = ci - 1;    // 規則說該換了，但實際還沒換
-  }
-  return c;
-}
-function contractOf(key) {
-  const k = parseInt(key), y = k / 10000 | 0, m = (k / 100 | 0) % 100 - 1, day = Date.UTC(y, m, k % 100);
-  const c = contractIdx(day + 86399000);        // 以當天收盤時的合約為準（換月當天就顯示新合約）
-  const cy = Math.floor(c / 12), cm = c % 12;
-  return { day, exp: expiryOf(cy, cm), month: cm + 1 };
-}
-function daysLeft(key) { const c = contractOf(key); return Math.round((c.exp - c.day) / 86400000); }
-function contractNote(key) { const c = contractOf(key), e = new Date(c.exp); return `${c.month}月合約，${e.getUTCMonth() + 1}/${e.getUTCDate()} 到期`; }
 $('volBody').onclick = e => { const tr = e.target.closest('tr'); if (tr) openVolImg(tr.dataset.md); };
 $('imgClose').onclick = closeVolImg;
 $('imgModal').onclick = e => { if (e.target.id === 'imgModal') closeVolImg(); };
@@ -1685,8 +1702,31 @@ function pivots(vals, i0, i1) {
   return out;
 }
 
+// 疊上月同期：看單一盤（某一天）時，找上一個合約「剩餘天數相同」的那天（沒有完全一樣的就找差最少、最多差 3 天），
+// 把它的每條線按「幾點幾分」對齊，疊成同顏色的虛線。剩餘天數 = 到該合約到期日的日曆天（見 daysLeft）
+let showOverlay = false;
+try { showOverlay = localStorage.getItem('acctChart11Overlay') === '1'; } catch (e) {}
+function overlayInfo() {
+  if (!showOverlay || !D) return null;
+  const mid = (view.a + view.b) / 2, S = D.sessions.find(s => mid >= s.si - 0.5 && mid <= s.ei + 0.5);
+  if (!S || S.night || view.b - view.a > (S.ei - S.si) * 1.5 + 5) return { msg: '疊上月同期：請先點選單一天' };
+  const k = String(S.key).slice(0, 8), c = dayContract(k), dl = daysLeft(k);
+  let best = null;
+  D.sessions.forEach(P => {
+    if (P.night || P === S) return;
+    const pk = String(P.key).slice(0, 8);
+    if (dayContract(pk) !== c - 1) return;
+    const pdl = daysLeft(pk), diff = Math.abs(pdl - dl);
+    if (!best || diff < best.diff || (diff === best.diff && pdl > best.pdl)) best = { P, pk, pdl, diff };
+  });
+  const cm = (c + 11) % 12 + 1, now = `本盤 ${c % 12 + 1}月合約剩 ${dl} 天`;
+  if (!best || best.diff > 3) return { msg: `疊上月同期：${now}，資料裡沒有 ${cm}月合約剩 ${dl} 天左右的日子` };
+  const map = {}; for (let j = best.P.si; j <= best.P.ei; j++) map[D.rows[j].mins] = j;
+  return { jOf: i => map[D.rows[i].mins], msg: `虛線＝上月同期 ${best.P.label} ${cm}月合約剩 ${best.pdl} 天（${now}）` };
+}
 function draw() {
   if (!D || !cv.clientWidth) return;
+  const OV = overlayInfo(), ovV = (s, i) => { if (!OV || !OV.jOf) return null; const j = OV.jOf(i); return j == null ? null : s.vals[j]; };
   const W = cv.clientWidth, H = cv.clientHeight;
   AXW = phoneLayout() || W < 900 ? 52 : 74;
   const act = D.series.filter(s => s.on);
@@ -1733,7 +1773,7 @@ function draw() {
     let lo = Infinity, hi = -Infinity;
     if (s.manual) { lo = s.manual.lo; hi = s.manual.hi; }      // 使用者在 Y 軸上拉過 → 用手動範圍
     else {
-      for (let i = i0; i <= i1; i++) { const v = s.vals[i]; if (v === null) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
+      for (let i = i0; i <= i1; i++) for (const v of [s.vals[i], ovV(s, i)]) { if (v === null) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
       if (lo === Infinity) { lo = 0; hi = 1; }
       if (lo === hi) { const d = Math.abs(lo) * 0.1 || 1; lo -= d; hi += d; }
       else { const pad = (hi - lo) / 18; lo -= pad; hi += pad; }
@@ -1806,6 +1846,17 @@ function draw() {
       ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
     });
   });
+  if (OV && OV.jOf) act.forEach(s => {                      // 上月同期：同顏色虛線，畫在實線下面
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.globalAlpha = .6; ctx.setLineDash([7, 5]); ctx.lineJoin = 'round';
+    ctx.beginPath(); let pen = false;
+    for (let i = a; i <= b; i++) {
+      const v = ovV(s, i);
+      if (v === null) { if (!s.bridge) pen = false; continue; }
+      const x = xOf(i), y = s.yOf(v);
+      if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
+    }
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  });
   act.forEach(s => {
     if (s.name === '獲利率' && s.lo < 0 && s.hi > 0) {     // 獲利率 0% 基準線
       ctx.strokeStyle = s.color; ctx.globalAlpha = .45; ctx.setLineDash([6, 4]); ctx.lineWidth = 1;
@@ -1852,6 +1903,12 @@ function draw() {
   });
   ctx.restore();
 
+  if (OV) {                                                 // 疊圖說明（圖的右上角）
+    ctx.font = `700 12px ${FONT}`; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+    const tw = ctx.measureText(OV.msg).width;
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillRect(x1 - tw - 14, y1 - 26, tw + 12, 20);
+    ctx.fillStyle = OV.jOf ? '#334155' : '#b45309'; ctx.fillText(OV.msg, x1 - 8, y1 - 22);
+  }
   // 每盤的波動率小框（資料來自 VOL；預設畫在該盤上方置中，可以用滑鼠拖到別的位置，盤太窄就不畫；有分時圖的可以點開）
   geom.volBoxes = [];
   ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
@@ -2163,7 +2220,9 @@ cv.addEventListener('pointermove', e => {
   if (!h || h.mode !== 'plot' || i < 0 || i >= D.rows.length) { hoverIdx = null; tip.style.display = 'none'; draw(); return; }
   hoverIdx = i; draw();
   tip.innerHTML = `<b>${D.rows[i].full}</b>` + D.series.filter(s => s.on).map(s =>
-    `<div><i style="background:${s.color}"></i>${s.name}<span>${fmt(s.vals[i], AXIS_DEC4[s.name] && s.dec ? 4 : s.dec)}${s.vals[i] === null ? '' : s.unit}</span></div>`).join('');
+    `<div><i style="background:${s.color}"></i>${s.name}<span>${fmt(s.vals[i], AXIS_DEC4[s.name] && s.dec ? 4 : s.dec)}${s.vals[i] === null ? '' : s.unit}` +
+    (ov => ov && ov.jOf ? (j => `<em style="opacity:.6;font-style:normal">　上月 ${j == null || s.vals[j] === null ? '--' : fmt(s.vals[j], AXIS_DEC4[s.name] && s.dec ? 4 : s.dec) + s.unit}</em>`)(ov.jOf(i)) : '')(overlayInfo()) +
+    `</span></div>`).join('');
   tip.style.display = 'block';
   const tw = tip.offsetWidth, th = tip.offsetHeight;
   tip.style.left = (px(e) + 16 + tw > cv.clientWidth ? px(e) - tw - 16 : px(e) + 16) + 'px';
@@ -2294,6 +2353,13 @@ function setPivots(on) {
   draw();
 }
 $('btnPivot').onclick = () => setPivots(!showPivots);
+function setOverlay(on) {
+  showOverlay = on; $('btnOverlay').classList.toggle('on', on);
+  try { localStorage.setItem('acctChart11Overlay', on ? '1' : '0'); } catch (e) {}
+  draw();
+}
+$('btnOverlay').onclick = () => setOverlay(!showOverlay);
+$('btnOverlay').classList.toggle('on', showOverlay);
 $('btnPivot').classList.toggle('on', showPivots);
 // 每一分鐘自動載入一次：按鈕上倒數計時，歸零就讀檔（擦除模式中先暫停）；手動載入後重新從 1:00 倒數
 const AUTO_SEC = 60;
@@ -2326,6 +2392,7 @@ window.addEventListener('keydown', e => {
   if (mod || e.altKey) return;
   if (k === 'r') syncNow();
   else if (k === 'p') setPivots(!showPivots);
+  else if (k === 'o') setOverlay(!showOverlay);
   else if (k === 'e' && D) setEraser(!eraser);
   else if (e.key === 'Escape' && eraser) setEraser(false);
 });
