@@ -168,6 +168,22 @@
   .sheet-head h2 { margin: 0; font-size: 16px; font-weight: 900; color: #facc15; letter-spacing: -.2px; }
   .sheet-head h2 em { font-style: normal; color: #fff; }
   .sheet-head span { font-size: 11px; font-weight: 700; color: #94a3b8; }
+  .tvc { background: #0b1220; padding: 12px 16px 14px; color: #e2e8f0; }
+  .tvcRow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .tvcRow > span { font-size: 12px; color: #64748b; flex-shrink: 0; }
+  #tvcBan { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tvcChip { padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #1e293b; color: #94a3b8; border: 1px solid #334155; cursor: pointer; }
+  .tvcChip:hover { background: #293548; color: #e2e8f0; }
+  .tvcChip.dim { opacity: .45; }
+  .tvcChip.on { background: #1e40af; color: #dbeafe; border-color: #3b82f6; opacity: 1; }
+  #tvcCards { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .tvcCard { display: inline-flex; flex-direction: column; align-items: center; padding: 6px 14px; border-radius: 8px; min-width: 120px; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); }
+  .tvcCard small { font-size: 10px; color: #94a3b8; white-space: nowrap; }
+  .tvcCard b { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .tvcCard i { font-style: normal; font-size: 10px; color: #64748b; }
+  #tvcChart { height: 520px; width: 100%; border: 1px solid #1e293b; border-radius: 12px; background: #0f172a; }
+  #tvcLegend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 12px; color: #cbd5e1; }
+  #tvcLegend .ln { display: inline-block; width: 22px; vertical-align: middle; margin-right: 5px; border-top: 2px solid; }
   .monthPick { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; color: #94a3b8; }
   .monthPick select { background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 13px; font-weight: 900; cursor: pointer; }
   .tblWrap { overflow-x: auto; }
@@ -415,6 +431,15 @@
   </div>
 
   <div id="page-tables">
+    <section class="sheet hidden" id="tvcCard">
+      <div class="sheet-head"><h2>歷史時間價值比對<em>（本期／前期／更前期）</em></h2><span id="tvcInfo"></span></div>
+      <div class="tvc">
+        <div class="tvcRow"><span>選　盤</span><div id="tvcBan"></div></div>
+        <div id="tvcCards"></div>
+        <div id="tvcChart"></div>
+        <div id="tvcLegend"></div>
+      </div>
+    </section>
     <section class="sheet" id="dailyCard">
       <div class="sheet-head"><h2>每日損益表<em>（實單）</em></h2><span id="dailyRange"></span><label class="monthPick">合約月份<select id="dailyMonth"></select></label></div>
       <div class="tblWrap">
@@ -514,6 +539,7 @@ function setMobilePage(n) {
   const root = document.getElementById('app-root');
   if (root) root.scrollTop = 0;
   window.scrollTo(0, 0);
+  if (n === 2) setTimeout(() => { tvcRender(); if (tvcChart) tvcChart.resize(); }, 0);
   if (n === 1) { lastOnSess = null; window.dispatchEvent(new Event('resize')); resize(); }   // 藏起來時捲動位置會歸零，回來要重新捲到選的那一盤
 }
 document.getElementById('page-btn').onclick = () => setMobilePage(mobilePage === 2 ? 1 : 2);
@@ -1116,7 +1142,7 @@ function loadTable(table, name) {
   document.title = '50ETF期權績效表';
   $('lowN').value = TV_LOWN;
   $('lowBar').classList.toggle('hidden', !series.some(s => s.name === '時價膨脹率'));
-  buildChips(); buildSessions(); buildVolTable(); buildDailyTable(); fitChart(); resize(); fitChart(); buildZone();
+  buildChips(); buildSessions(); buildVolTable(); buildDailyTable(); fitChart(); resize(); fitChart(); buildZone(); buildTvc();
 }
 
 // ───────────── 介面 ─────────────
@@ -1315,6 +1341,100 @@ function contractOf(key) {
 function daysLeft(key) { const c = contractOf(key); return Math.round((c.exp - c.day) / 86400000); }
 function contractNote(key) { const c = contractOf(key), e = new Date(c.exp); return `${c.month}月合約，${e.getUTCMonth() + 1}/${e.getUTCDate()} 到期`; }
 // 每日損益表按「合約月份」分期：預設只列正在做的合約（本期），下拉選單可以看以前的月份或全部
+// 歷史時間價值比對（第 2 頁最上面，仿 joption-tw.github.io/sample/time-value）：
+// 用「剩餘天數」選盤，把本期（實線）、前期（虛線）、更前期（點線）合約同一個剩餘天數那天的時間價值，按幾點幾分疊在一起
+// 時間價值用主圖過濾過的那條（D.series 的「時間價值」）；換月當天只取已經換到該合約之後的資料
+const TVC_DEF = [
+  { off: 0, name: '本期', color: '#ef4444', type: 'solid', width: 3 },
+  { off: 1, name: '前期', color: '#f87171', type: [12, 4], width: 2 },
+  { off: 2, name: '更前期', color: '#fca5a5', type: [2, 7], width: 1.6 },
+];
+const TVC_MINS = []; for (let m = 570; m <= 900; m++) if (m <= 690 || m >= 780) TVC_MINS.push(m);
+const hmOf = m => p2(m / 60 | 0) + ':' + p2(m % 60);
+let tvcBan = null, tvcChart = null, tvcData = null, tvcLoading = false;
+function tvcDays() {
+  const tv = D && D.series.find(s => s.name === '時間價值'); if (!tv) return [];
+  const days = [];
+  D.sessions.forEach(S => {
+    if (S.night) return;
+    const k = String(S.key).slice(0, 8), c = dayContract(k), byMin = {}; let n = 0;
+    for (let i = S.si; i <= S.ei; i++) { const r = D.rows[i]; if (r.pad || tv.vals[i] === null || contractIdx(r.ms) !== c) continue; byMin[r.mins] = tv.vals[i]; n++; }
+    if (n >= 10) days.push({ k, c, dl: daysLeft(k), byMin, label: S.label });
+  });
+  return days;
+}
+function buildTvc() {
+  const days = tvcDays();
+  $('tvcCard').classList.toggle('hidden', !days.length);
+  if (!days.length) return;
+  const cur = days[days.length - 1].c, pick = (c, dl, near) => {
+    let best = null;
+    days.forEach(d => { if (d.c !== c) return; const diff = Math.abs(d.dl - dl); if (diff <= near && (!best || diff < best.diff)) best = { ...d, diff }; });
+    return best;
+  };
+  const dls = [...new Set(days.filter(d => d.c >= cur - 2).map(d => d.dl))].sort((a, b) => b - a);
+  const curDl = days[days.length - 1].dl;
+  if (tvcBan !== 'all' && !dls.includes(tvcBan)) tvcBan = curDl;
+  $('tvcBan').innerHTML = `<button class="tvcChip${tvcBan === 'all' ? ' on' : ''}" data-b="all">全部</button>` +
+    dls.map(n => `<button class="tvcChip${n === tvcBan ? ' on' : ''}${days.some(d => d.c === cur && d.dl === n) ? '' : ' dim'}" data-b="${n}">剩 ${n} 天</button>`).join('');
+  $('tvcBan').querySelectorAll('button').forEach(b => b.onclick = () => { tvcBan = b.dataset.b === 'all' ? 'all' : +b.dataset.b; buildTvc(); });
+  const mName = c => `${c % 12 + 1}月`;
+  let x, lines;
+  if (tvcBan === 'all') {                                   // 全部：剩餘天數由多到少接起來，各期只放剩餘天數完全相同的那天
+    const order = dls.slice();
+    x = []; order.forEach(n => TVC_MINS.forEach(m => x.push(`剩${n}天 ${hmOf(m)}`)));
+    lines = TVC_DEF.map(def => {
+      const c = cur - def.off, got = order.map(n => pick(c, n, 0));
+      return { def, c, day: null, vals: got.flatMap(d => TVC_MINS.map(m => d && d.byMin[m] != null ? d.byMin[m] : null)) };
+    });
+  } else {                                                  // 單一盤：剩餘天數一樣的那天（沒有就找差最少的，最多差 2 天）
+    x = TVC_MINS.map(hmOf);
+    lines = TVC_DEF.map(def => {
+      const c = cur - def.off, d = pick(c, tvcBan, def.off ? 2 : 0);
+      return { def, c, day: d, vals: TVC_MINS.map(m => d && d.byMin[m] != null ? d.byMin[m] : null) };
+    });
+  }
+  const tag = l => `${l.def.name} ${mName(l.c)}合約${l.def.off ? '' : '（即時）'}` + (l.day ? `　${l.day.label} 剩${l.day.dl}天` : '');
+  // 縮幅卡片：開盤 09:30~09:35 的平均 → 最後一筆，跌了幾 %
+  $('tvcCards').innerHTML = tvcBan === 'all' ? '' : lines.map(l => {
+    if (!l.day) return '';
+    const v = TVC_MINS.map(m => l.day.byMin[m]).filter(v => v != null);
+    const op = TVC_MINS.filter(m => m >= 570 && m <= 575).map(m => l.day.byMin[m]).filter(v => v != null);
+    const st = op.length ? op.reduce((a, b) => a + b, 0) / op.length : v[0], en = v[v.length - 1], rate = (st - en) / st * 100;
+    return `<div class="tvcCard"><small>${tag(l)}</small><b style="color:${rate >= 0 ? l.def.color : '#facc15'}">${rate >= 0 ? '▼' : '▲'} ${Math.abs(rate).toFixed(2)}%</b><i>${st.toFixed(4)}${op.length ? '' : `（${hmOf(TVC_MINS.find(m => l.day.byMin[m] != null))} 起）`} → ${en.toFixed(4)}</i></div>`;
+  }).join('');
+  $('tvcLegend').innerHTML = '<span style="color:#64748b">圖例：</span>' + lines.map(l =>
+    `<span><span class="ln" style="border-top-color:${l.def.color};border-top-style:${l.def.off === 0 ? 'solid' : l.def.off === 1 ? 'dashed' : 'dotted'}"></span>${tag(l)}${l.vals.some(v => v !== null) ? '' : '（沒有資料）'}</span>`).join('') +
+    '<span style="color:#64748b">｜實線＝本期　虛線＝前期　點線＝更前期</span>';
+  $('tvcInfo').textContent = tvcBan === 'all' ? '全部剩餘天數接起來' : `剩 ${tvcBan} 天`;
+  tvcData = { x, lines };
+  tvcRender();
+}
+function tvcRender() {
+  if (!tvcData) return;
+  if (!window.echarts) {                                    // 圖表元件用 ECharts（和 sample 時間價值頁一樣），第一次用到才載入
+    if (!tvcLoading) { tvcLoading = true; const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js'; sc.onload = tvcRender; sc.onerror = () => { $('tvcChart').textContent = '圖表元件載入失敗（需要網路）'; }; document.head.appendChild(sc); }
+    return;
+  }
+  const el = $('tvcChart'); if (!el.clientWidth) return;   // 第 2 頁還沒打開：換頁時再畫
+  if (!tvcChart) { tvcChart = echarts.init(el); addEventListener('resize', () => tvcChart.resize()); }
+  const { x, lines } = tvcData;
+  tvcChart.setOption({
+    backgroundColor: '#0f172a', animation: false,
+    tooltip: { trigger: 'axis', backgroundColor: '#1e293b', borderColor: '#334155', textStyle: { color: '#e2e8f0', fontSize: 12 },
+      formatter: ps => `<div style="color:#94a3b8;font-size:11px;margin-bottom:4px">${ps[0].name}</div>` + ps.filter(p => p.value != null).map(p =>
+        `<div><span style="display:inline-block;width:10px;height:3px;background:${p.color};margin-right:6px;vertical-align:middle"></span>${p.seriesName}　<b>${(+p.value).toFixed(4)}</b></div>`).join('') },
+    grid: { left: 70, right: 24, top: 24, bottom: 80 },
+    xAxis: { type: 'category', data: x, boundaryGap: false, axisLabel: { color: '#64748b', fontSize: 10, rotate: x.length > 300 ? 30 : 0, interval: Math.max(0, Math.floor(x.length / 16) - 1) },
+      axisLine: { lineStyle: { color: '#1e293b' } }, splitLine: { show: false } },
+    yAxis: { type: 'value', scale: true, axisLabel: { color: '#64748b', fontSize: 11, formatter: v => v.toFixed(3) }, splitLine: { lineStyle: { color: '#1e293b', type: 'dashed' } } },
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0, height: 22, bottom: 16, borderColor: '#1e293b', backgroundColor: '#0f172a',
+      fillerColor: 'rgba(37,99,235,.25)', handleStyle: { color: '#3b82f6', borderColor: '#3b82f6' }, textStyle: { color: '#475569', fontSize: 10 } },
+      { type: 'inside', yAxisIndex: 0, zoomOnMouseWheel: 'shift', moveOnMouseMove: false }],
+    series: lines.map(l => ({ name: `${l.def.name} ${l.c % 12 + 1}月`, type: 'line', data: l.vals, symbol: 'none', connectNulls: tvcBan !== 'all',
+      lineStyle: { color: l.def.color, width: l.def.width, type: l.def.type }, itemStyle: { color: l.def.color } })),
+  }, true);
+}
 let dailyMonth = null;                       // null = 本期；'all' = 全部；數字 = contractIdx
 const dayContract = k => contractIdx(Date.UTC(+k.slice(0, 4), +k.slice(4, 6) - 1, +k.slice(6)) + 86399000);
 const nowContract = () => { const d = new Date(); return contractIdx(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes())); };
