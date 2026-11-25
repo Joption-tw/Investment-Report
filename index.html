@@ -38,6 +38,7 @@
     <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="common.js?v=20261120"></script>
+    <script src="trader-report.js?v=20261126"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         :root { --primary: #0f172a; --accent: #eab308; --danger: #dc2626; }
@@ -177,6 +178,11 @@
         html:not(.m-portrait) #session-panel { padding-top: 16px; }
         html:not(.m-portrait) #session-panel > div > * { margin-top: 0 !important; }
         html:not(.m-portrait) main { padding-bottom: 72px; }
+        /* 手機橫向第 4 頁：多空下單機成交（trader-report.js；電腦版放在第 1 頁，沒有第 4 頁） */
+        html:not(.m-portrait) #page-trader { display: none; }
+        html:not(.m-portrait) body.m-page-4 main { display: none; }
+        html:not(.m-portrait) body.m-page-4 #session-panel { display: block; }
+        html:not(.m-portrait) body.m-page-4 #page-trader { display: block !important; }
         /* 換頁鈕放右下角並加大：iPhone 橫向時，點螢幕最上緣常被 Safari 拿去叫出網址列，按鈕收不到 */
         #page-nav { display: none; }
         html:not(.m-portrait) #page-nav { display: flex; align-items: center; position: fixed; z-index: 60;
@@ -357,13 +363,16 @@
         makeDraggable('#page-nav', 'page-nav');
         makeDraggable('#trend-btn', 'trend-btn');
         let mobilePage = 1;
+        const PAGES = Math.min(screen.width, screen.height) < 600 ? 4 : 3;   // 手機多一頁：多空下單機成交（trader-report.js）
+        document.getElementById('page-no').innerText = `1 / ${PAGES}`;
         function setMobilePage(n) {
             mobilePage = n;
             document.body.classList.toggle('m-page-2', n === 2);
             document.body.classList.toggle('m-page-3', n === 3);
-            document.getElementById('page-no').innerText = `${n} / 3`;
+            document.body.classList.toggle('m-page-4', n === 4);
+            document.getElementById('page-no').innerText = `${n} / ${PAGES}`;
             document.getElementById('page-prev').disabled = n === 1;
-            document.getElementById('page-next').disabled = n === 3;
+            document.getElementById('page-next').disabled = n === PAGES;
             const root = document.getElementById('app-root');
             if (root) root.scrollTop = 0;
             window.scrollTo(0, 0);
@@ -1419,6 +1428,7 @@
                             <a href="november/" target="_blank" rel="noopener" className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-black text-blue-700 shadow-sm hover:bg-blue-50 active:bg-blue-100 whitespace-nowrap">大陸帳號 ›</a>
                             <a href="https://joption-tw.github.io/joption-site/tools/monitor.html" target="_blank" rel="noopener" className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-black text-blue-700 shadow-sm hover:bg-blue-50 active:bg-blue-100 whitespace-nowrap">同學會 ›</a>
                         </div>
+                        <${TraderReport} where="main" />
                         <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-2">
                             ${renderMobileCards()}
                             ${renderTotalCard()}
@@ -1630,6 +1640,7 @@
                             <p className="text-[10px] font-bold text-slate-400 px-3 sm:px-4 py-2">勝敗以全部帳號合計（眾人獲利）判定；獲利率 = 該盤獲利 ÷ 各帳號起始資產合計。紅 = 賺、綠 = 賠。${historyNote}<span className="sm:hidden">表格可左右滑動。</span></p>
                         </div>
 
+                        <${TraderReport} where="page" />
                         ${accounts.length === 0 && html`<div id="page-accounts" className="hidden bg-white rounded-xl border border-slate-200 p-6 text-center text-xs font-bold text-slate-400">這一週還沒有各帳號每盤損益</div>`}
                         ${accounts.length > 0 && html`
                             <div id="page-accounts" className="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">

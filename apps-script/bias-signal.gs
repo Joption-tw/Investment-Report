@@ -82,6 +82,9 @@ function doPost(e) {
     const doc = props.getProperty('TRADER_SETTINGS');
     return biasOut_({ ok: true, doc: doc ? JSON.parse(doc) : null });
   }
+  if (body.action === 'trader_report') {
+    try { return traderReport_(body, props); } catch (err) { return biasOut_({ ok: false, error: String(err && err.message || err).slice(0, 200) }); }
+  }
 
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
@@ -134,4 +137,89 @@ function biasTrim_(sh) {
   let k = 0;
   while (k < times.length && times[k][0] && times[k][0] < cutoff) k++;
   if (k > 0) sh.deleteRows(2, k);
+}
+
+// ===== 多空下單機成交上報（2026-11-26 加入，下單機 web_report.py）=====
+// { key, action: 'trader_report', pc: 電腦名稱, ver, at: 'yyyy/MM/dd HH:mm:ss', sess: '20261126_日盤',
+//   fills: [{ k, t, sess, mode: 實單|模擬, strat, act, prod, sym, side: 買|賣, qty, price, pts, net }],
+//   snap: [{ mode, strat, n, win, loss, pts, net, hold, unreal, total }], snap20: 每 20 分鐘那一張才是 true,
+//   perf: [{ sess, mode, trades, realized, cost, unreal, net, t }]（每盤損益，最近 30 盤，跟下單機「庫存 / 績效」頁同一份） }
+// 分頁：「下單機成交」一筆一列（序號去重複）、「下單機總表」每 20 分鐘存一張（這兩頁只留 14 天）；
+//       「下單機現況」「下單機每盤」每台只留最新的。
+const TR_FILL_TAB = '下單機成交', TR_NOW_TAB = '下單機現況', TR_SNAP_TAB = '下單機總表', TR_PERF_TAB = '下單機每盤';
+const TR_PERF_HEAD = ['時間', '電腦', '盤別', '模式', '成交筆數', '已實現元', '手續費稅元', '未實現元', '淨合計元', '最後更新'];
+const TR_FILL_HEAD = ['時間', '電腦', '盤別', '模式', '策略', '動作', '商品', '代碼', '買賣', '口數', '價格', '損益點', '損益元', '序號'];
+const TR_SNAP_HEAD = ['時間', '電腦', '盤別', '模式', '策略', '出場趟數', '贏', '輸', '已實現點', '已實現元', '持倉', '未實現元', '合計元'];
+const TR_FILL_TEXT = ['A:D', 'H:H', 'N:N'];
+const TR_TIME = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/;
+const TR_SESS = /^\d{8}_(日盤|夜盤)$/;
+
+function trSheet_(name, head, textCols) {
+  const ss = SpreadsheetApp.openById(BIAS_SHEET_ID);
+  let sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name, ss.getNumSheets());
+  // 每次都確認：時間、電腦、盤別、模式（成交頁加代碼、序號）是文字（不然試算表會把時間自動變成日期），第一列是標題
+  (textCols || ['A:D']).forEach(a => sh.getRange(a).setNumberFormat('@'));
+  if (sh.getRange(1, 1).getDisplayValue() !== head[0]) {
+    if (sh.getLastRow() > 0) sh.insertRowBefore(1);
+    sh.getRange(1, 1, 1, head.length).setValues([head]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// 整頁讀出來、去掉這台的舊列、加上這台最新的、整頁寫回（其他台的不動）
+function trReplace_(tab, head, pc, mine) {
+  const sh = trSheet_(tab, head);
+  const W = head.length, last = sh.getLastRow();
+  const keep = last > 1 ? sh.getRange(2, 1, last - 1, W).getValues().filter(r => r[0] !== '' && String(r[1]) !== pc) : [];
+  const all = keep.concat(mine);
+  if (last > 1) sh.getRange(2, 1, last - 1, W).clearContent();
+  sh.getRange(2, 1, all.length, W).setValues(all);
+}
+
+function traderReport_(body, props) {
+  const txt = (v, n) => String(v === null || v === undefined ? '' : v).slice(0, n);
+  const num = v => typeof v === 'number' && isFinite(v) && Math.abs(v) < 1e9 ? v : '';
+  const pc = txt(body.pc, 40);
+  if (!pc || !TR_TIME.test(body.at || '') || !TR_SESS.test(body.sess || '')) return biasOut_({ ok: false, error: '格式錯誤' });
+  const mode = m => m === '實單' || m === '模擬' ? m : '';
+  const fills = (Array.isArray(body.fills) ? body.fills : []).slice(0, 500)
+    .filter(f => f && TR_TIME.test(f.t) && TR_SESS.test(f.sess) && mode(f.mode) && (f.side === '買' || f.side === '賣')
+                 && typeof f.qty === 'number' && f.qty > 0 && typeof f.price === 'number' && f.k)
+    .map(f => [f.t, pc, f.sess, f.mode, txt(f.strat, 30), txt(f.act, 30), txt(f.prod, 10), txt(f.sym, 20), f.side, f.qty, f.price,
+               num(f.pts), num(f.net), pc + '|' + txt(f.k, 80)]);
+  const snap = (Array.isArray(body.snap) ? body.snap : []).slice(0, 60).filter(r => r && mode(r.mode))
+    .map(r => [body.at, pc, body.sess, r.mode, txt(r.strat, 30), num(r.n), num(r.win), num(r.loss), num(r.pts), num(r.net),
+               txt(r.hold, 200), num(r.unreal), num(r.total)]);
+  const perf = (Array.isArray(body.perf) ? body.perf : []).slice(0, 80).filter(r => r && mode(r.mode) && TR_SESS.test(r.sess))
+    .map(r => [body.at, pc, r.sess, r.mode, num(r.trades), num(r.realized), num(r.cost), num(r.unreal), num(r.net), txt(r.t, 20)]);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    let added = 0;
+    if (fills.length) {
+      const sh = trSheet_(TR_FILL_TAB, TR_FILL_HEAD, TR_FILL_TEXT);
+      const last = sh.getLastRow(), from = Math.max(2, last - 3000 + 1);
+      const have = new Set(last >= from ? sh.getRange(from, 14, last - from + 1, 1).getDisplayValues().map(v => v[0]) : []);
+      const add = fills.filter(f => !have.has(f[13]) && (have.add(f[13]), true)).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+      if (add.length) sh.getRange(sh.getLastRow() + 1, 1, add.length, TR_FILL_HEAD.length).setValues(add);
+      added = add.length;
+    }
+    trReplace_(TR_NOW_TAB, TR_SNAP_HEAD, pc, snap.length ? snap : [[body.at, pc, body.sess, '模擬', '（還沒有成交）', '', '', '', '', '', '', '', '']]);
+    if (perf.length) trReplace_(TR_PERF_TAB, TR_PERF_HEAD, pc, perf);
+    if (body.snap20 && snap.length) {
+      const sh = trSheet_(TR_SNAP_TAB, TR_SNAP_HEAD);
+      sh.getRange(sh.getLastRow() + 1, 1, snap.length, TR_SNAP_HEAD.length).setValues(snap);
+    }
+    const today = Utilities.formatDate(new Date(), BIAS_TZ, 'yyyy-MM-dd');
+    if (props.getProperty('trTrimmed') !== today) {
+      biasTrim_(trSheet_(TR_FILL_TAB, TR_FILL_HEAD, TR_FILL_TEXT));
+      biasTrim_(trSheet_(TR_SNAP_TAB, TR_SNAP_HEAD));
+      props.setProperty('trTrimmed', today);
+    }
+    return biasOut_({ ok: true, added, tr: 1 });   // tr：下單機用來確認接收程式是新版（舊版會走多空紀錄那條、也回 ok）
+  } finally {
+    lock.releaseLock();
+  }
 }
