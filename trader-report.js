@@ -70,9 +70,12 @@ const TraderReport = ({ where }) => {
     }, []);
 
     if (!active) return null;
-    if (!loaded || !now.length) {                   // 還沒有任何一台下單機上報：電腦版整塊不顯示，手機那一頁寫一句
-        return where === 'page' ? html`<section id="page-trader" className="bg-white rounded-xl border border-slate-200 p-6 text-center text-xs font-bold text-slate-400">
-            ${loaded ? '多空下單機還沒有上報成交（下單機要勾「成交上報網頁」）' : '讀取多空下單機成交中…'}</section>` : null;
+    if (!loaded || !now.length) {                   // 還沒有任何一台下單機上報：寫一句告訴大家要怎麼開
+        return html`<section id=${where === 'page' ? 'page-trader' : 'trader-report'} className="my-3 bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-3 py-2 bg-slate-900 text-sm font-black text-yellow-400">多空下單機成交</div>
+            <div className="p-5 text-center text-xs font-bold text-slate-400">${loaded
+                ? '還沒有下單機上報：那台下單機更新到 v1.56 以後，勾上面的「成交上報網頁」，有成交或賺賠有變，約 20 秒內就會出現在這裡'
+                : '讀取多空下單機成交中…'}</div></section>`;
     }
     const ok = m => flt === 'all' || (flt === 'live') === (m === '實單');
     const pcs = [...new Set(now.map(r => r[1]))];
