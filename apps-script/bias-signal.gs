@@ -50,7 +50,8 @@ function biasOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-function doGet() {
+function doGet(e) {
+  if (e && e.parameter && e.parameter.page === 'flatten') return trFlattenPage_(e);   // 網頁一鍵平倉確認頁（只認擁有者）
   return biasOut_({ ok: true });
 }
 
@@ -85,6 +86,7 @@ function doPost(e) {
   if (body.action === 'trader_report') {
     try { return traderReport_(body, props); } catch (err) { return biasOut_({ ok: false, error: String(err && err.message || err).slice(0, 200) }); }
   }
+  if (body.action === 'command_ack') return trCommandAck_(body);
 
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
@@ -216,10 +218,112 @@ function traderReport_(body, props) {
     if (props.getProperty('trTrimmed') !== today) {
       biasTrim_(trSheet_(TR_FILL_TAB, TR_FILL_HEAD, TR_FILL_TEXT));
       biasTrim_(trSheet_(TR_SNAP_TAB, TR_SNAP_HEAD));
+      biasTrim_(trSheet_(TR_CMD_TAB, TR_CMD_HEAD, ['A:H']));
       props.setProperty('trTrimmed', today);
     }
     return biasOut_({ ok: true, added, tr: 1 });   // tr：下單機用來確認接收程式是新版（舊版會走多空紀錄那條、也回 ok）
   } finally {
     lock.releaseLock();
   }
+}
+
+// ===== 網頁一鍵平倉（2026-11-26 加入，下單機 v1.56 web_report.Commands）=====
+// 網頁按鈕開「只有我自己」那個部署的網址 ?page=flatten&pc=電腦 → 只有擁有者的 Google 帳號開得了（伺服器每一步也再檢查一次）
+// → 按確定 → 「下單機指令」分頁加一列（簽章 = HMAC-SHA256(編號|電腦|時間, BIAS_KEY)，下單機用 upload.json 的 key 驗）
+// → 有勾「允許網頁平倉」的下單機 10 秒內讀到、執行「一鍵清倉」→ action command_ack 回報結果。
+const TR_CMD_TAB = '下單機指令';
+const TR_CMD_HEAD = ['時間', '電腦', '指令', '編號', '簽章', '狀態', '回報時間', '回報內容'];
+
+function trOwner_() {
+  const me = Session.getActiveUser().getEmail();
+  return !!me && me === Session.getEffectiveUser().getEmail();
+}
+
+function trEsc_(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function trFlattenPage_(e) {
+  const out = h => HtmlService.createHtmlOutput(h).setTitle('多空下單機一鍵平倉').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  if (!trOwner_()) return out('<p style="font:16px sans-serif;padding:24px">沒有權限：只有擁有者的 Google 帳號可以按一鍵平倉。</p>');
+  const pc = String((e.parameter && e.parameter.pc) || '').slice(0, 40);
+  let holds = '';
+  try {
+    const sh = SpreadsheetApp.openById(BIAS_SHEET_ID).getSheetByName(TR_NOW_TAB);
+    if (sh && sh.getLastRow() > 1) {
+      holds = sh.getRange(2, 1, sh.getLastRow() - 1, TR_SNAP_HEAD.length).getDisplayValues()
+        .filter(r => r[1] === pc && r[10] && r[4] !== '合計').map(r => `${r[3]}・${r[4]}：${r[10]}`).join('<br>');
+    }
+  } catch (err) {}
+  return out(`<div style="font:16px sans-serif;padding:20px;max-width:520px">
+    <h2 style="color:#b91c1c;margin:0 0 8px">多空下單機一鍵平倉</h2>
+    <div>電腦：<b>${trEsc_(pc) || '（沒有指定）'}</b></div>
+    <div style="margin:8px 0;color:#475569;font-size:14px">網頁上次看到的持倉：<br>${holds || '（沒有持倉紀錄）'}</div>
+    <div style="margin:8px 0;color:#475569;font-size:13px">按下去後，那台下單機（有勾「允許網頁平倉」）大約 10 秒內會照做，跟按下單機畫面的「一鍵清倉」一樣：目前是實單就清實單。</div>
+    <button id="go" ${pc ? '' : 'disabled'} style="font-size:20px;padding:12px 28px;background:#dc2626;color:#fff;border:0;border-radius:10px;margin-top:8px">確定一鍵平倉</button>
+    <div id="msg" style="margin-top:14px;font-weight:bold"></div>
+    <script>
+      const pc = ${JSON.stringify(pc)};
+      let armed = 0;   // 確認框在 Apps Script 頁面裡會被擋，改成按兩次：第一次變「再按一次確定」，10 秒內再按才送
+      document.getElementById('go').onclick = () => {
+        const b = document.getElementById('go');
+        if (Date.now() - armed > 10000) {
+          armed = Date.now(); b.textContent = '再按一次確定平倉「' + pc + '」'; b.style.background = '#7f1d1d';
+          setTimeout(() => { if (Date.now() - armed >= 10000 && !b.disabled) { b.textContent = '確定一鍵平倉'; b.style.background = '#dc2626'; } }, 10100);
+          return;
+        }
+        b.disabled = true; b.textContent = '送出中…';
+        google.script.run.withSuccessHandler(t => { document.getElementById('msg').textContent = t; b.textContent = '已送出'; })
+          .withFailureHandler(err => { document.getElementById('msg').textContent = '失敗：' + err.message; b.disabled = false; b.textContent = '確定一鍵平倉'; })
+          .trFlattenRequest(pc);
+      };
+    </script></div>`);
+}
+
+// 確認頁按下去（google.script.run 呼叫，名稱不能有底線結尾）
+function trFlattenRequest(pc) {
+  if (!trOwner_()) throw new Error('沒有權限');
+  pc = String(pc || '').slice(0, 40);
+  if (!pc) throw new Error('沒有指定電腦');
+  const key = PropertiesService.getScriptProperties().getProperty('BIAS_KEY');
+  const t = Utilities.formatDate(new Date(), BIAS_TZ, 'yyyy/MM/dd HH:mm:ss');
+  const id = Utilities.getUuid().slice(0, 8);
+  const sig = Utilities.base64Encode(Utilities.computeHmacSha256Signature(id + '|' + pc + '|' + t, key, Utilities.Charset.UTF_8));
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sh = trSheet_(TR_CMD_TAB, TR_CMD_HEAD, ['A:H']);
+    sh.getRange(sh.getLastRow() + 1, 1, 1, TR_CMD_HEAD.length).setValues([[t, pc, '一鍵平倉', id, sig, '等下單機', '', '']]);
+  } finally {
+    lock.releaseLock();
+  }
+  return `已送出（${t}，編號 ${id}）。下單機大約 10 秒內會照做，結果會出現在投資報表網頁。`;
+}
+
+// 下單機回報：{ key, action: 'command_ack', pc, id, result, at }
+function trCommandAck_(body) {
+  const pc = String(body.pc || '').slice(0, 40), id = String(body.id || '').slice(0, 20);
+  if (!pc || !id) return biasOut_({ ok: false, error: '格式錯誤' });
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sh = trSheet_(TR_CMD_TAB, TR_CMD_HEAD, ['A:H']);
+    const n = sh.getLastRow() - 1;
+    if (n < 1) return biasOut_({ ok: false, error: '找不到指令' });
+    const v = sh.getRange(2, 1, n, 4).getDisplayValues();
+    for (let i = v.length - 1; i >= 0; i--) {
+      if (v[i][1] === pc && v[i][3] === id) {
+        sh.getRange(i + 2, 6, 1, 3).setValues([['已執行', String(body.at || '').slice(0, 20), String(body.result || '').slice(0, 200)]]);
+        return biasOut_({ ok: true, tr: 1 });
+      }
+    }
+    return biasOut_({ ok: false, error: '找不到指令' });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 在編輯器執行這個：第一次會跳 Google 授權（多一項「查看你的電子郵件地址」，一鍵平倉認帳號用）；執行記錄印出是不是擁有者
+function trCheckOwner() {
+  Logger.log(trOwner_() ? '擁有者帳號確認 OK' : '不是擁有者（或沒授權）');
 }

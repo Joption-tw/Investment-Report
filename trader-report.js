@@ -2,12 +2,14 @@
 // 電腦：放在第 1 頁「個別帳號績效」按鈕下面（where="main"）；手機：自己一頁（where="page"，橫向第 4 頁、直向排在最下面）
 // 資料：試算表「下單機現況」（每台最新一張總表）、「下單機每盤」（每盤損益，最近 30 盤）、「下單機成交」（一筆一列）、「下單機總表」（每 20 分鐘一張）
 //   由歐大電腦上的多空下單機送到 apps-script/bias-signal.gs（action: trader_report）；下單機要勾「成交上報網頁」
-// 網頁每 20 秒讀一次；下單機有成交最慢 20 秒送、沒成交每 20 分鐘送一張總表
+// 網頁每 20 秒讀一次；下單機有成交或總表 / 損益有變就送（最快 20 秒一次），另外每 20 分鐘存一張總表（「每 20 分鐘合計」）
 
 const TR_SHEET = '1Ysw95KCFw-sHDUntrzsg7zCWPsiAyIIHJ1Yg69pKuKk';
 const TR_GVIZ = (tab, tq) => `https://docs.google.com/spreadsheets/d/${TR_SHEET}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(tab)}`
                            + (tq ? `&tq=${encodeURIComponent(tq)}` : '') + `&t=${Date.now()}`;
 const TR_REFRESH = 20000;
+// 一鍵平倉：Apps Script「多空指標接收」另一個部署（存取權「只有我自己」= 只有擁有者的 Google 帳號開得了）
+const TR_CMD_URL = 'https://script.google.com/macros/s/AKfycbzPFecPYeQvcW-vkbfMvkPIisK4RC27DgDBoNJjAkElkvBl7Io2w-2FR45t7p2K2KO-5g/exec';
 const trGet = async (tab, tq, head) => {
     const r = await fetch(TR_GVIZ(tab, tq));
     if (!r.ok) return [];
@@ -34,6 +36,7 @@ const TraderReport = ({ where }) => {
     const active = (where === 'page') === TR_PHONE;
     const [now, setNow] = React.useState([]);       // 下單機現況
     const [perf, setPerf] = React.useState([]);     // 每盤損益
+    const [cmds, setCmds] = React.useState([]);     // 網頁一鍵平倉指令（最近幾筆）
     const [fills, setFills] = React.useState([]);   // 這一盤成交
     const [hist, setHist] = React.useState([]);     // 這一盤每 20 分鐘的合計
     const [loaded, setLoaded] = React.useState(false);
@@ -49,13 +52,14 @@ const TraderReport = ({ where }) => {
             try {
                 const cur = await trGet('下單機現況', 'select *', ['時間', '電腦', '盤別', '模式', '策略']);
                 const sess = cur.map(r => r[2]).sort().pop();
-                const [f, h, p] = sess ? await Promise.all([
+                const [f, h, p, c] = sess ? await Promise.all([
                     trGet('下單機成交', `select * where C = '${sess}' order by A desc limit 500`, ['時間', '電腦', '盤別', '模式', '策略']),
                     trGet('下單機總表', `select A,B,D,M where C = '${sess}' and E = '合計' order by A`, ['時間', '電腦', '模式']),
-                    trGet('下單機每盤', 'select *', ['時間', '電腦', '盤別', '模式', '成交筆數'])
-                ]) : [[], [], []];
+                    trGet('下單機每盤', 'select *', ['時間', '電腦', '盤別', '模式', '成交筆數']),
+                    trGet('下單機指令', 'select A,B,C,D,F,G,H order by A desc limit 20', ['時間', '電腦', '指令'])
+                ]) : [[], [], [], []];
                 if (dead) return;
-                setNow(cur.filter(r => r[2] === sess)); setFills(f); setHist(h); setPerf(p); setLoaded(true);
+                setNow(cur.filter(r => r[2] === sess)); setFills(f); setHist(h); setPerf(p); setCmds(c); setLoaded(true);
             } catch (e) { if (!dead) setLoaded(true); }
         };
         load();
@@ -84,7 +88,7 @@ const TraderReport = ({ where }) => {
         <section id=${where === 'page' ? 'page-trader' : 'trader-report'} className="my-3 bg-white rounded-xl shadow border border-slate-200 overflow-hidden">
             <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-900 text-white">
                 <span className="text-sm font-black text-yellow-400">多空下單機成交</span>
-                <span className="text-[11px] text-slate-300">${trSess(now[0][2])}・有成交約 20 秒內更新，總表每 20 分鐘一張</span>
+                <span className="text-[11px] text-slate-300">${trSess(now[0][2])}・有成交或賺賠有變，最快 20 秒更新</span>
                 <span className="ml-auto flex gap-1">${btn('all', '全部')}${btn('live', '只看實單')}${btn('sim', '只看模擬')}</span>
             </div>
             ${pcs.map(pc => {
@@ -98,7 +102,20 @@ const TraderReport = ({ where }) => {
                 const pfSess = [...new Set(pf.map(r => r[2]))].sort((a, b) => trSessKey(b) < trSessKey(a) ? -1 : 1);
                 return html`
                 <div key=${pc} className="px-2 sm:px-3 py-2 border-b border-slate-100">
-                    <div className="text-[11px] font-bold text-slate-500 mb-1">${pc}・總表更新 ${at.slice(11)}（${trAgo(at)}）</div>
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <span className="text-[11px] font-bold text-slate-500">${pc}・總表更新 ${at.slice(11)}（${trAgo(at)}）</span>
+                        <a href=${`${TR_CMD_URL}?page=flatten&pc=${encodeURIComponent(pc)}`} target="_blank" rel="noopener"
+                           className="ml-auto px-3 py-1 rounded-md bg-red-600 text-white text-xs font-black shadow hover:bg-red-700">⚡ 一鍵平倉（限本人 Google 帳號）</a>
+                    </div>
+                    ${(() => {
+                        const c = cmds.find(r => r[1] === pc);
+                        if (!c) return null;
+                        const waitMin = (tpeNow().getTime() - (wallMs(c[0]) || 0)) / 60000;
+                        const st = c[4] === '已執行' ? html`<span className="text-emerald-700">下單機 ${String(c[5]).slice(11)} 已照做：${c[6]}</span>`
+                                 : waitMin > 2 ? html`<span className="text-red-600">下單機沒有回應（可能沒開、或沒勾「允許網頁平倉」）</span>`
+                                 : html`<span className="text-amber-600">等下單機照做中…</span>`;
+                        return html`<div className="text-[11px] font-bold text-slate-500 mb-1">上次網頁一鍵平倉：${String(c[0]).slice(5)}・${st}</div>`;
+                    })()}
                     ${pfModes.map(m => {
                         const cur = pf.find(r => r[3] === m && r[2] === now[0][2]);
                         const all = pf.filter(r => r[3] === m);
