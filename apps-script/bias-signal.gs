@@ -62,7 +62,16 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return biasOut_({ ok: false, error: '格式錯誤' }); }
   const props = PropertiesService.getScriptProperties();
   const key = props.getProperty('BIAS_KEY');
-  if (!key || body.key !== key) return biasOut_({ ok: false, error: '密碼錯誤' });
+  if (!key || !body.key) return biasOut_({ ok: false, error: '密碼錯誤' });
+  if (body.key !== key) {
+    // 下單機「上報專用」密碼（v1.58 起包在下單機裡，打勾就能上傳）：只能上報成交、回報網頁平倉，不能改線上參數或多空指標
+    if (body.key !== trReportKey_(key)) return biasOut_({ ok: false, error: '密碼錯誤' });
+    if (body.action === 'trader_report') {
+      try { return traderReport_(body, props); } catch (err) { return biasOut_({ ok: false, error: String(err && err.message || err).slice(0, 200) }); }
+    }
+    if (body.action === 'command_ack') return trCommandAck_(body);
+    return biasOut_({ ok: false, error: '這組密碼只能上報成交' });
+  }
 
   // 多空下單機共用參數（2026-11-21 加入）：任一台按「存檔」上傳，其他台按「更新參數」或開程式時下載
   //   { key, action: 'set_settings', at: '2026-11-21 15:19:57', from: 電腦名稱, ver: 版本, settings: {…} }
@@ -229,9 +238,13 @@ function traderReport_(body, props) {
 
 // ===== 網頁一鍵平倉（2026-11-26 加入，下單機 v1.56 web_report.Commands）=====
 // 網頁按鈕開「只有我自己」那個部署的網址 ?page=flatten&pc=電腦 → 只有擁有者的 Google 帳號開得了（伺服器每一步也再檢查一次）
-// → 按確定 → 「下單機指令」分頁加一列（簽章 = HMAC-SHA256(編號|電腦|時間, BIAS_KEY)，下單機用 upload.json 的 key 驗）
+// → 按確定 → 「下單機指令」分頁加一列（簽章 = HMAC-SHA256(編號|電腦|時間, 上報專用密碼)，v1.58 起下單機用包在裡面的上報密碼驗）
 // → 有勾「允許網頁平倉」的下單機 10 秒內讀到、執行「一鍵清倉」→ action command_ack 回報結果。
 const TR_CMD_TAB = '下單機指令';
+// 上報專用密碼 = base64(HMAC-SHA256('trader-report-v1', BIAS_KEY))：從 BIAS_KEY 算出來，不另外存；拿到它也推不回 BIAS_KEY
+function trReportKey_(key) {
+  return Utilities.base64Encode(Utilities.computeHmacSha256Signature('trader-report-v1', key, Utilities.Charset.UTF_8));
+}
 const TR_CMD_HEAD = ['時間', '電腦', '指令', '編號', '簽章', '狀態', '回報時間', '回報內容'];
 
 function trOwner_() {
@@ -285,7 +298,7 @@ function trFlattenRequest(pc) {
   if (!trOwner_()) throw new Error('沒有權限');
   pc = String(pc || '').slice(0, 40);
   if (!pc) throw new Error('沒有指定電腦');
-  const key = PropertiesService.getScriptProperties().getProperty('BIAS_KEY');
+  const key = trReportKey_(PropertiesService.getScriptProperties().getProperty('BIAS_KEY'));
   const t = Utilities.formatDate(new Date(), BIAS_TZ, 'yyyy/MM/dd HH:mm:ss');
   const id = Utilities.getUuid().slice(0, 8);
   const sig = Utilities.base64Encode(Utilities.computeHmacSha256Signature(id + '|' + pc + '|' + t, key, Utilities.Charset.UTF_8));
@@ -326,4 +339,17 @@ function trCommandAck_(body) {
 // 在編輯器執行這個：第一次會跳 Google 授權（多一項「查看你的電子郵件地址」，一鍵平倉認帳號用）；執行記錄印出是不是擁有者
 function trCheckOwner() {
   Logger.log(trOwner_() ? '擁有者帳號確認 OK' : '不是擁有者（或沒授權）');
+}
+
+// 在編輯器執行這個：刪掉測試用電腦（名稱「測試機」開頭）在下單機各分頁的列，別台不動
+function trDeleteTestRows() {
+  const ss = SpreadsheetApp.openById(BIAS_SHEET_ID);
+  [TR_FILL_TAB, TR_NOW_TAB, TR_SNAP_TAB, TR_PERF_TAB, TR_CMD_TAB].forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh || sh.getLastRow() < 2) return;
+    const v = sh.getRange(2, 2, sh.getLastRow() - 1, 1).getDisplayValues();
+    let n = 0;
+    for (let i = v.length - 1; i >= 0; i--) if (/^測試機/.test(v[i][0])) { sh.deleteRow(i + 2); n++; }
+    Logger.log(name + '：刪 ' + n + ' 列');
+  });
 }
