@@ -43,6 +43,12 @@ const TraderReport = ({ where }) => {
     const [flt, setFlt] = React.useState(() => { try { return localStorage.getItem('tr-filter') || 'all'; } catch (e) { return 'all'; } });
     const [showAll, setShowAll] = React.useState(false);
     const pick = v => { setFlt(v); try { localStorage.setItem('tr-filter', v); } catch (e) {} };
+    // 電腦排序（▲▼）和每一塊的開合，只記在這台瀏覽器
+    const trLoad = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
+    const trSave = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+    const [order, setOrder] = React.useState(() => trLoad('tr-order', []));
+    const [fold, setFold] = React.useState(() => trLoad('tr-fold', {}));
+    const toggle = k => setFold(f => { const n = { ...f }; if (n[k]) delete n[k]; else n[k] = 1; trSave('tr-fold', n); return n; });
 
     React.useEffect(() => {
         if (!active) return;
@@ -78,7 +84,21 @@ const TraderReport = ({ where }) => {
                 : '讀取多空下單機成交中…'}</div></section>`;
     }
     const ok = m => flt === 'all' || (flt === 'live') === (m === '實單');
-    const pcs = [...new Set(now.map(r => r[1]))];
+    const seen = [...new Set(now.map(r => r[1]))];
+    const pcs = [...order.filter(pc => seen.includes(pc)), ...seen.filter(pc => !order.includes(pc))];
+    const move = (pc, d) => {
+        const list = [...pcs], i = list.indexOf(pc), j = i + d;
+        if (j < 0 || j >= list.length) return;
+        [list[i], list[j]] = [list[j], list[i]];
+        const full = [...list, ...order.filter(x => !list.includes(x))];   // 這盤沒上報的電腦也留著原本的順序
+        setOrder(full); trSave('tr-order', full);
+    };
+    // 可以開合的小標題：▾ 打開、▸ 收起
+    const head = (k, label) => html`<button onClick=${() => toggle(k)}
+        className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 mb-0.5">
+        <span className="inline-block w-3 text-slate-400">${fold[k] ? '▸' : '▾'}</span>${label}</button>`;
+    const arrow = (pc, d, dis) => html`<button onClick=${() => move(pc, d)} disabled=${dis} title=${d < 0 ? '往上移' : '往下移'}
+        className=${'w-6 h-6 rounded border text-[11px] font-black ' + (dis ? 'border-slate-200 text-slate-300' : 'border-slate-300 text-slate-600 bg-white hover:bg-yellow-100')}>${d < 0 ? '▲' : '▼'}</button>`;
     const TH = 'px-2 py-1.5 text-[11px] font-black text-center whitespace-nowrap';
     const TD = 'px-2 py-1 text-xs text-center whitespace-nowrap';
     const modeBg = (m, sum) => m === '實單' ? (sum ? 'bg-red-100' : 'bg-red-50') : (sum ? 'bg-blue-100' : 'bg-blue-50');
@@ -94,7 +114,7 @@ const TraderReport = ({ where }) => {
                 <span className="text-[11px] text-slate-300">${trSess(now[0][2])}・有成交或賺賠有變，最快 20 秒更新</span>
                 <span className="ml-auto flex gap-1">${btn('all', '全部')}${btn('live', '只看實單')}${btn('sim', '只看模擬')}</span>
             </div>
-            ${pcs.map(pc => {
+            ${pcs.map((pc, pi) => {
                 const rows = now.filter(r => r[1] === pc && ok(r[3]));
                 const at = now.find(r => r[1] === pc)[0];
                 const h = hist.filter(r => r[1] === pc && ok(r[2]));
@@ -103,13 +123,21 @@ const TraderReport = ({ where }) => {
                 const pf = perf.filter(r => r[1] === pc && ok(r[3]));
                 const pfModes = ['實單', '模擬'].filter(m => pf.some(r => r[3] === m));
                 const pfSess = [...new Set(pf.map(r => r[2]))].sort((a, b) => trSessKey(b) < trSessKey(a) ? -1 : 1);
+                const closed = !!fold[pc];
+                const brief = pfModes.map(m => { const c = pf.find(r => r[3] === m && r[2] === now[0][2]); const v = c ? (trNum(c[8]) || 0) : 0;
+                    return html`<span key=${m} className=${'px-1.5 rounded ' + modeBg(m, false)}>${m} <b className=${trTone(v)}>${trMoney(v) || '0'}</b></span>`; });
                 return html`
                 <div key=${pc} className="px-2 sm:px-3 py-2 border-b border-slate-100">
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="text-[11px] font-bold text-slate-500">${pc}・總表更新 ${at.slice(11)}（${trAgo(at)}）</span>
+                    <div className=${'flex flex-wrap items-center gap-2' + (closed ? '' : ' mb-1')}>
+                        <span className="flex gap-0.5">${arrow(pc, -1, pi === 0)}${arrow(pc, 1, pi === pcs.length - 1)}</span>
+                        <button onClick=${() => toggle(pc)} className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800">
+                            <span className="inline-block w-3 text-slate-400">${closed ? '▸' : '▾'}</span>
+                            <span className="text-sm font-black text-slate-800">${pc}</span>・總表更新 ${at.slice(11)}（${trAgo(at)}）</button>
+                        ${closed && html`<span className="flex gap-1 text-[11px] font-bold text-slate-600">${brief}</span>`}
                         <a href=${`${TR_CMD_URL}?page=flatten&pc=${encodeURIComponent(pc)}`} target="_blank" rel="noopener"
                            className="ml-auto px-3 py-1 rounded-md bg-red-600 text-white text-xs font-black shadow hover:bg-red-700">⚡ 一鍵平倉（限本人 Google 帳號）</a>
                     </div>
+                    ${!closed && html`<div>
                     ${(() => {
                         const c = cmds.find(r => r[1] === pc);
                         if (!c) return null;
@@ -119,7 +147,8 @@ const TraderReport = ({ where }) => {
                                  : html`<span className="text-amber-600">等下單機照做中…</span>`;
                         return html`<div className="text-[11px] font-bold text-slate-500 mb-1">上次網頁一鍵平倉：${String(c[0]).slice(5)}・${st}</div>`;
                     })()}
-                    ${pfModes.map(m => {
+                    ${pfModes.length > 0 && head(pc + '|cards', '本盤損益')}
+                    ${!fold[pc + '|cards'] && pfModes.map(m => {
                         const cur = pf.find(r => r[3] === m && r[2] === now[0][2]);
                         const all = pf.filter(r => r[3] === m);
                         const sum = i => all.reduce((a, r) => a + (trNum(r[i]) || 0), 0);
@@ -139,7 +168,8 @@ const TraderReport = ({ where }) => {
                             <div className="text-[10px] font-bold text-slate-500 px-3">最近 ${all.length} 盤累計：淨合計 <span className=${trTone(sum(8))}>${trMoney(sum(8))}</span>・已實現 ${trMoney(sum(5))}・手續費＋稅 ${Math.round(sum(6)).toLocaleString()}・成交 ${sum(4)} 筆</div>
                         </div>`;
                     })}
-                    <div className="overflow-x-auto">
+                    ${head(pc + '|strat', '各策略（本盤）')}
+                    ${!fold[pc + '|strat'] && html`<div className="overflow-x-auto">
                         <table className="w-full">
                             <thead><tr className="bg-slate-800 text-slate-200">
                                 ${['模式', '策略', '出場趟數', '贏 / 輸', '已實現點', '已實現(元)', '持倉', '未實現(元)', '合計(元)'].map(x => html`<th key=${x} className=${TH}>${x}</th>`)}
@@ -162,11 +192,11 @@ const TraderReport = ({ where }) => {
                                 }) : html`<tr><td colSpan="9" className=${TD + ' text-slate-400'}>這一盤還沒有${flt === 'live' ? '實單' : flt === 'sim' ? '模擬' : ''}成交</td></tr>`}
                             </tbody>
                         </table>
-                    </div>
+                    </div>`}
                     ${times.length > 0 && html`
                     <div className="mt-2 overflow-x-auto">
-                        <div className="text-[11px] font-bold text-slate-500 mb-0.5">每 20 分鐘合計（元，含未實現）</div>
-                        <table className="text-xs">
+                        ${head(pc + '|h20', '每 20 分鐘合計（元，含未實現）')}
+                        ${!fold[pc + '|h20'] && html`<table className="text-xs">
                             <tbody>
                                 <tr className="bg-slate-100"><td className=${TD + ' font-black'}>時間</td>${times.map(t => html`<td key=${t} className=${TD + ' font-bold text-slate-600'}>${t.slice(11, 16)}</td>`)}</tr>
                                 ${modes.map(m => html`<tr key=${m} className=${modeBg(m, false)}>
@@ -175,12 +205,12 @@ const TraderReport = ({ where }) => {
                                         return html`<td key=${t} className=${TD + ' text-right ' + trTone(v)}>${v === null ? '' : trMoney(v)}</td>`; })}
                                 </tr>`)}
                             </tbody>
-                        </table>
+                        </table>`}
                     </div>`}
                     ${pfSess.length > 0 && html`
                     <div className="mt-2 overflow-x-auto">
-                        <div className="text-[11px] font-bold text-slate-500 mb-0.5">每盤損益（最近 ${pfSess.length} 盤）</div>
-                        <table className="w-full">
+                        ${head(pc + '|perf', `每盤損益（最近 ${pfSess.length} 盤）`)}
+                        ${!fold[pc + '|perf'] && html`<table className="w-full">
                             <thead><tr className="bg-slate-800 text-slate-200">
                                 ${['盤別', '模式', '成交筆數', '已實現', '手續費＋稅', '未實現', '淨合計'].map(x => html`<th key=${x} className=${TH}>${x}</th>`)}
                             </tr></thead>
@@ -196,13 +226,14 @@ const TraderReport = ({ where }) => {
                                     </tr>`;
                                 })}
                             </tbody>
-                        </table>
+                        </table>`}
+                    </div>`}
                     </div>`}
                 </div>`;
             })}
             <div className="px-2 sm:px-3 py-2">
-                <div className="text-[11px] font-bold text-slate-500 mb-1">這一盤成交（新的在上面，共 ${fillRows.length} 筆）</div>
-                ${fillRows.length ? html`
+                ${head('fills', `這一盤成交（新的在上面，共 ${fillRows.length} 筆）`)}
+                ${fold.fills ? null : fillRows.length ? html`
                 <div className="overflow-x-auto">
                     <table className="w-full">
                         <thead><tr className="bg-slate-800 text-slate-200">
